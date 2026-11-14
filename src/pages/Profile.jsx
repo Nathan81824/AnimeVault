@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import {
   UserRound,
@@ -6,178 +6,165 @@ import {
   Pencil,
   Check,
   X,
-  Users,
-  UserPlus,
-  UserCheck,
-  Clapperboard,
+  Globe,
+  Heart,
+  Bookmark,
+  Film,
   CalendarDays,
   LoaderCircle,
   RefreshCw,
+  ExternalLink,
+  ArrowLeft,
+  Clapperboard,
 } from 'lucide-react'
+
 import { supabase } from '../lib/supabase'
 import { useAuthStore } from '../features/auth/authStore'
+import profileService from '../features/profile/profileService'
 
-function getInitials(name) {
-  return (name || 'AV')
-    .trim()
-    .split(/\s+/)
-    .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase() ?? '')
-    .join('')
-}
-
-function formatDate(date) {
-  if (!date) return 'Anime Vault member'
-
-  const parsed = new Date(date)
-
-  if (Number.isNaN(parsed.getTime())) return 'Anime Vault member'
-
-  return `Joined ${parsed.toLocaleDateString(undefined, {
-    month: 'long',
-    year: 'numeric',
-  })}`
+function getErrorMessage(error) {
+  return error?.message || 'Something went wrong. Please try again.'
 }
 
 function ProfileAvatar({ src, name, size = 'large' }) {
   const sizeClass =
     size === 'small'
-      ? 'h-12 w-12 text-sm'
-      : 'h-28 w-28 text-3xl sm:h-36 sm:w-36 sm:text-4xl'
+      ? 'h-12 w-12 text-lg'
+      : 'h-28 w-28 text-4xl sm:h-36 sm:w-36 sm:text-5xl'
 
   return (
-    <div
-      className={`flex shrink-0 items-center justify-center overflow-hidden rounded-full border-4 border-[#12121c] bg-gradient-to-br from-violet-500 to-fuchsia-700 font-black text-white shadow-xl shadow-violet-950/30 ${sizeClass}`}
-    >
+    <div className={`flex shrink-0 items-center justify-center overflow-hidden rounded-full border-4 border-[#07050d] bg-gradient-to-br from-purple-500 to-fuchsia-700 font-black text-white shadow-xl ${sizeClass}`}>
       {src ? (
         <img
           src={src}
-          alt={`${name}'s avatar`}
+          alt={`${name || 'User'} avatar`}
           className="h-full w-full object-cover"
         />
       ) : (
-        getInitials(name)
+        <span>{name?.charAt(0)?.toUpperCase() || 'U'}</span>
       )}
     </div>
   )
 }
 
-export default function Profile() {
-  const { id } = useParams()
-  const user = useAuthStore((state) => state.user)
+function ProfileStat({ icon: Icon, label, value }) {
+  return (
+    <div className="flex items-center gap-3 rounded-2xl border border-white/5 bg-white/[0.03] p-4">
+      <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-purple-500/10 text-purple-400">
+        <Icon size={19} />
+      </div>
 
-  const profileId = id || user?.id
-  const isOwnProfile = Boolean(user?.id && profileId === user.id)
+      <div>
+        <p className="text-lg font-black text-white">{value}</p>
+        <p className="text-xs text-gray-500">{label}</p>
+      </div>
+    </div>
+  )
+}
+
+export default function Profile() {
+  const { username } = useParams()
+  const { user } = useAuthStore()
+
+  const fileInputRef = useRef(null)
 
   const [profile, setProfile] = useState(null)
-  const [savedCount, setSavedCount] = useState(0)
-  const [followerCount, setFollowerCount] = useState(0)
-  const [followingCount, setFollowingCount] = useState(0)
-  const [isSubscribed, setIsSubscribed] = useState(false)
-
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [subscribing, setSubscribing] = useState(false)
-  const [editing, setEditing] = useState(false)
   const [uploadingAvatar, setUploadingAvatar] = useState(false)
-
+  const [editing, setEditing] = useState(false)
   const [error, setError] = useState('')
-  const [notice, setNotice] = useState('')
+  const [success, setSuccess] = useState('')
 
   const [form, setForm] = useState({
+    displayName: '',
     username: '',
-    display_name: '',
     bio: '',
-    avatar_url: '',
+    website: '',
+    favoriteAnime: '',
   })
 
+  const isOwnProfile = Boolean(user?.id && profile?.id === user.id)
+
   const loadProfile = useCallback(async () => {
-    if (!profileId || !supabase) {
-      setProfile(null)
-      setLoading(false)
-
-      if (!supabase) {
-        setError('Supabase is not configured. Check your environment variables.')
-      }
-
-      return
-    }
-
     setLoading(true)
     setError('')
-    setNotice('')
 
-    const { data: profileData, error: profileError } = await supabase
-      .from('profiles')
-      .select('id, username, display_name, bio, avatar_url, created_at')
-      .eq('id', profileId)
-      .maybeSingle()
+    try {
+      let result
 
-    if (profileError) {
-      setError('Could not load this profile. Please try again.')
+      if (username) {
+        const cleanUsername = username.trim().replace(/^@/, '')
+
+        const { data, error: queryError } = await supabase
+          .from('profiles')
+          .select('*')
+          .ilike('username', cleanUsername)
+          .maybeSingle()
+
+        if (queryError) throw queryError
+
+        result = {
+          data: data
+            ? {
+                id: data.id,
+                username: data.username || '',
+                displayName: data.display_name || '',
+                avatarUrl: data.avatar_url || null,
+                bio: data.bio || '',
+                website: data.website || '',
+                favoriteAnime: data.favorite_anime || '',
+                createdAt: data.created_at || null,
+                updatedAt: data.updated_at || null,
+              }
+            : null,
+          error: null,
+        }
+      } else {
+        if (!user?.id) {
+          setProfile(null)
+          return
+        }
+
+        result = await profileService.getOrCreateProfile(user)
+      }
+
+      if (result?.error) throw result.error
+
+      const loadedProfile = result?.data || null
+
+      setProfile(loadedProfile)
+
+      if (loadedProfile) {
+        setForm({
+          displayName: loadedProfile.displayName || '',
+          username: loadedProfile.username || '',
+          bio: loadedProfile.bio || '',
+          website: loadedProfile.website || '',
+          favoriteAnime: loadedProfile.favoriteAnime || '',
+        })
+      } else {
+        setForm({
+          displayName: '',
+          username: '',
+          bio: '',
+          website: '',
+          favoriteAnime: '',
+        })
+      }
+    } catch (err) {
+      setError(getErrorMessage(err))
       setProfile(null)
+    } finally {
       setLoading(false)
-      return
     }
-
-    if (!profileData) {
-      setProfile(null)
-      setLoading(false)
-      return
-    }
-
-    setProfile(profileData)
-    setForm({
-      username: profileData.username ?? '',
-      display_name: profileData.display_name ?? '',
-      bio: profileData.bio ?? '',
-      avatar_url: profileData.avatar_url ?? '',
-    })
-
-    const [
-      savedResult,
-      followersResult,
-      followingResult,
-      subscriptionResult,
-    ] = await Promise.all([
-      supabase
-        .from('saved_anime')
-        .select('id', { count: 'exact', head: true })
-        .eq('user_id', profileId),
-
-      supabase
-        .from('subscriptions')
-        .select('id', { count: 'exact', head: true })
-        .eq('creator_id', profileId),
-
-      supabase
-        .from('subscriptions')
-        .select('id', { count: 'exact', head: true })
-        .eq('subscriber_id', profileId),
-
-      user?.id && user.id !== profileId
-        ? supabase
-            .from('subscriptions')
-            .select('id')
-            .eq('subscriber_id', user.id)
-            .eq('creator_id', profileId)
-            .maybeSingle()
-        : Promise.resolve({ data: null, error: null }),
-    ])
-
-    setSavedCount(savedResult.count ?? 0)
-    setFollowerCount(followersResult.count ?? 0)
-    setFollowingCount(followingResult.count ?? 0)
-    setIsSubscribed(Boolean(subscriptionResult.data))
-
-    setLoading(false)
-  }, [profileId, user?.id])
+  }, [user, username])
 
   useEffect(() => {
     loadProfile()
   }, [loadProfile])
 
-  function handleFormChange(event) {
+  const handleChange = (event) => {
     const { name, value } = event.target
 
     setForm((current) => ({
@@ -186,629 +173,569 @@ export default function Profile() {
     }))
   }
 
-  async function handleSaveProfile(event) {
+  const handleSave = async (event) => {
     event.preventDefault()
 
-    if (!user?.id || !supabase) return
+    if (!user?.id || !isOwnProfile) return
 
-    const username = form.username.trim().replace(/^@/, '').toLowerCase()
-    const displayName = form.display_name.trim()
-    const bio = form.bio.trim()
-    const avatarUrl = form.avatar_url.trim()
-
-    if (!username) {
-      setError('Please choose a username.')
+    if (!form.displayName.trim()) {
+      setError('Please enter your display name.')
       return
     }
 
-    if (!/^[a-z0-9_]{3,24}$/.test(username)) {
-      setError('Username must be 3–24 characters and use only letters, numbers, or underscores.')
+    const cleanUsername = form.username
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, '')
+
+    if (!cleanUsername) {
+      setError('Please enter a username.')
       return
-    }
-
-    if (displayName.length > 50) {
-      setError('Display name must be 50 characters or fewer.')
-      return
-    }
-
-    if (bio.length > 300) {
-      setError('Your bio must be 300 characters or fewer.')
-      return
-    }
-
-    if (avatarUrl) {
-      try {
-        const parsedUrl = new URL(avatarUrl)
-
-        if (parsedUrl.protocol !== 'https:' && parsedUrl.protocol !== 'http:') {
-          throw new Error('Invalid URL')
-        }
-      } catch {
-        setError('Enter a valid image URL beginning with https:// or http://.')
-        return
-      }
     }
 
     setSaving(true)
     setError('')
-    setNotice('')
+    setSuccess('')
 
-    const { data, error: saveError } = await supabase
-      .from('profiles')
-      .upsert(
-        {
-          id: user.id,
-          username,
-          display_name: displayName || username,
-          bio,
-          avatar_url: avatarUrl || null,
-        },
-        { onConflict: 'id' }
-      )
-      .select('id, username, display_name, bio, avatar_url, created_at')
-      .single()
-
-    if (saveError) {
-      setError(
-        saveError.code === '23505'
-          ? 'That username is already taken. Try another one.'
-          : 'Could not save your profile. Check your Supabase profile policies and try again.'
-      )
-    } else {
-      setProfile(data)
-      setForm({
-        username: data.username ?? '',
-        display_name: data.display_name ?? '',
-        bio: data.bio ?? '',
-        avatar_url: data.avatar_url ?? '',
+    try {
+      const result = await profileService.updateProfile(user.id, {
+        displayName: form.displayName.trim(),
+        username: cleanUsername,
+        bio: form.bio.trim(),
+        website: form.website.trim(),
+        favoriteAnime: form.favoriteAnime.trim(),
       })
-      setEditing(false)
-      setNotice('Your profile has been updated.')
-    }
 
-    setSaving(false)
+      if (result?.error) throw result.error
+
+      const updatedProfile = result?.data || result
+
+      setProfile((current) => ({
+        ...current,
+        ...updatedProfile,
+        displayName: updatedProfile?.displayName || form.displayName.trim(),
+        username: updatedProfile?.username || cleanUsername,
+        bio: updatedProfile?.bio ?? form.bio.trim(),
+        website: updatedProfile?.website ?? form.website.trim(),
+        favoriteAnime: updatedProfile?.favoriteAnime ?? form.favoriteAnime.trim(),
+      }))
+
+      setForm((current) => ({
+        ...current,
+        username: cleanUsername,
+      }))
+
+      setEditing(false)
+      setSuccess('Your profile has been updated.')
+    } catch (err) {
+      setError(getErrorMessage(err))
+    } finally {
+      setSaving(false)
+    }
   }
 
-  async function handleAvatarUpload(event) {
+  const handleAvatarUpload = async (event) => {
     const file = event.target.files?.[0]
 
-    if (!file || !user?.id || !supabase) return
+    if (!file || !user?.id || !isOwnProfile) return
 
     if (!file.type.startsWith('image/')) {
-      setError('Choose an image file.')
+      setError('Please select an image file.')
       return
     }
 
-    if (file.size > 3 * 1024 * 1024) {
-      setError('Your image must be smaller than 3 MB.')
+    if (file.size > 5 * 1024 * 1024) {
+      setError('Your image must be smaller than 5MB.')
       return
     }
 
     setUploadingAvatar(true)
     setError('')
-    setNotice('')
+    setSuccess('')
 
-    const extension = file.name.split('.').pop()?.toLowerCase() || 'jpg'
-    const filePath = `${user.id}/avatar-${Date.now()}.${extension}`
+    try {
+      const { data: authData, error: authError } =
+        await supabase.auth.getUser()
 
-    const { error: uploadError } = await supabase.storage
-      .from('avatars')
-      .upload(filePath, file, {
-        upsert: true,
-        contentType: file.type,
-      })
+      if (authError) throw authError
 
-    if (uploadError) {
-      setError('Could not upload your avatar. Check that the avatars storage bucket and policies exist.')
-      setUploadingAvatar(false)
-      event.target.value = ''
-      return
-    }
+      const authenticatedUser = authData?.user
 
-    const { data } = supabase.storage
-      .from('avatars')
-      .getPublicUrl(filePath)
-
-    setForm((current) => ({
-      ...current,
-      avatar_url: data.publicUrl,
-    }))
-
-    setNotice('Avatar uploaded. Save your profile to apply it.')
-    setUploadingAvatar(false)
-    event.target.value = ''
-  }
-
-  async function handleSubscription() {
-    if (!user?.id || !profile || !supabase || subscribing) return
-
-    setSubscribing(true)
-    setError('')
-    setNotice('')
-
-    if (isSubscribed) {
-      const { error: deleteError } = await supabase
-        .from('subscriptions')
-        .delete()
-        .eq('subscriber_id', user.id)
-        .eq('creator_id', profile.id)
-
-      if (deleteError) {
-        setError('Could not unsubscribe. Please try again.')
-      } else {
-        setIsSubscribed(false)
-        setFollowerCount((count) => Math.max(0, count - 1))
-        setNotice('You have unsubscribed from this creator.')
+      if (!authenticatedUser?.id) {
+        throw new Error('You are not authenticated. Please sign in again.')
       }
-    } else {
-      const { error: insertError } = await supabase
-        .from('subscriptions')
-        .insert({
-          subscriber_id: user.id,
-          creator_id: profile.id,
+
+      if (authenticatedUser.id !== user.id) {
+        throw new Error(
+          'Your app user and Supabase session do not match. Please sign in again.'
+        )
+      }
+
+      const extension = file.name.split('.').pop()?.toLowerCase() || 'jpg'
+      const filePath = `${authenticatedUser.id}/avatar-${Date.now()}.${extension}`
+
+      const { error: uploadError } = await supabase.storage
+        .from('avatars')
+        .upload(filePath, file, {
+          cacheControl: '3600',
+          upsert: false,
+          contentType: file.type,
         })
 
-      if (insertError) {
-        setError(
-          insertError.code === '23505'
-            ? 'You are already subscribed to this creator.'
-            : 'Could not subscribe. Check your Supabase subscription policies.'
+      if (uploadError) {
+        throw new Error(
+          `AVATAR STORAGE UPLOAD FAILED: ${uploadError.message}`
         )
-      } else {
-        setIsSubscribed(true)
-        setFollowerCount((count) => count + 1)
-        setNotice('You are now subscribed to this creator.')
+      }
+
+      const { data: publicUrlData } = supabase.storage
+        .from('avatars')
+        .getPublicUrl(filePath)
+
+      const avatarUrl = publicUrlData?.publicUrl
+
+      if (!avatarUrl) {
+        throw new Error('Could not generate your avatar URL.')
+      }
+
+      const result = await profileService.updateProfile(
+        authenticatedUser.id,
+        {
+          avatarUrl,
+        }
+      )
+
+      if (result?.error) {
+        throw new Error(
+          `PROFILE DATABASE UPDATE FAILED: ${result.error.message}`
+        )
+      }
+
+      setProfile((current) => ({
+        ...current,
+        avatarUrl,
+      }))
+
+      setSuccess('Your profile picture has been updated.')
+    } catch (err) {
+      setError(getErrorMessage(err))
+    } finally {
+      setUploadingAvatar(false)
+
+      if (fileInputRef.current) {
+        fileInputRef.current.value = ''
       }
     }
+  }
 
-    setSubscribing(false)
+  const cancelEditing = () => {
+    setForm({
+      displayName: profile?.displayName || '',
+      username: profile?.username || '',
+      bio: profile?.bio || '',
+      website: profile?.website || '',
+      favoriteAnime: profile?.favoriteAnime || '',
+    })
+
+    setEditing(false)
+    setError('')
   }
 
   if (loading) {
     return (
-      <div className="flex min-h-[70vh] items-center justify-center bg-[#09090f] text-violet-300">
-        <LoaderCircle size={34} className="animate-spin" />
+      <div className="flex min-h-[70vh] items-center justify-center">
+        <div className="flex flex-col items-center gap-4">
+          <LoaderCircle className="animate-spin text-purple-400" size={38} />
+          <p className="text-sm text-gray-400">Loading profile...</p>
+        </div>
       </div>
     )
   }
 
-  if (!profile && !isOwnProfile) {
+  if (error && !profile) {
     return (
-      <div className="flex min-h-[70vh] flex-col items-center justify-center bg-[#09090f] px-5 text-center text-white">
-        <UserRound size={48} className="mb-4 text-violet-400" />
-        <h1 className="text-2xl font-black">Profile not found</h1>
+      <div className="flex min-h-[70vh] flex-col items-center justify-center px-5 text-center">
+        <UserRound size={48} className="mb-4 text-purple-400" />
+        <h2 className="text-xl font-black text-white">Unable to load profile</h2>
+        <p className="mt-2 max-w-md text-sm text-gray-400">{error}</p>
+
+        <button
+          onClick={loadProfile}
+          className="mt-6 flex items-center gap-2 rounded-xl bg-purple-600 px-5 py-3 text-sm font-bold text-white transition hover:bg-purple-500"
+        >
+          <RefreshCw size={16} />
+          Try Again
+        </button>
+      </div>
+    )
+  }
+
+  if (!profile) {
+    return (
+      <div className="flex min-h-[70vh] flex-col items-center justify-center px-5 text-center">
+        <UserRound size={52} className="mb-4 text-purple-400" />
+        <h2 className="text-2xl font-black text-white">Profile not found</h2>
         <p className="mt-2 text-sm text-gray-400">
-          This profile may not exist or may not be available.
+          This profile may have been removed or the username may be incorrect.
         </p>
-        {error && <p className="mt-3 text-sm text-red-300">{error}</p>}
+
         <Link
           to="/explore"
-          className="mt-6 rounded-xl bg-violet-600 px-5 py-3 text-sm font-bold hover:bg-violet-500"
+          className="mt-6 rounded-xl bg-purple-600 px-5 py-3 text-sm font-bold text-white transition hover:bg-purple-500"
         >
-          Explore Anime Vault
+          Explore Anime
         </Link>
       </div>
     )
   }
 
-  if (!profile && isOwnProfile) {
-    return (
-      <div className="min-h-screen bg-[#09090f] px-4 py-10 text-white sm:px-6">
-        <div className="mx-auto max-w-2xl rounded-3xl border border-white/10 bg-[#12121c] p-6 sm:p-8">
-          <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-violet-500/10 text-violet-300">
-            <UserRound size={28} />
+  const joinedDate = profile.createdAt
+    ? new Date(profile.createdAt).toLocaleDateString(undefined, {
+        month: 'long',
+        year: 'numeric',
+      })
+    : 'Anime Vault member'
+
+  return (
+    <div className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 lg:px-8">
+      <div className="mb-6 flex items-center justify-between">
+        <Link
+          to="/"
+          className="flex items-center gap-2 text-sm font-semibold text-gray-400 transition hover:text-white"
+        >
+          <ArrowLeft size={17} />
+          Back to Anime Vault
+        </Link>
+
+        <button
+          onClick={loadProfile}
+          disabled={loading}
+          className="rounded-xl border border-white/10 p-2.5 text-gray-400 transition hover:border-purple-500/40 hover:text-purple-400"
+          title="Refresh profile"
+        >
+          <RefreshCw size={17} />
+        </button>
+      </div>
+
+      <div className="overflow-hidden rounded-3xl border border-white/10 bg-[#100c1a]">
+        <div className="relative h-40 overflow-hidden bg-gradient-to-r from-purple-950 via-purple-700 to-fuchsia-900 sm:h-56">
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(255,255,255,0.14),transparent_35%),radial-gradient(circle_at_80%_80%,rgba(0,0,0,0.25),transparent_40%)]" />
+
+          <div className="absolute bottom-5 right-5 rounded-full border border-white/10 bg-black/20 px-4 py-2 text-xs font-bold tracking-widest text-purple-100 backdrop-blur-md">
+            ANIME VAULT MEMBER
+          </div>
+        </div>
+
+        <div className="px-5 pb-6 sm:px-8">
+          <div className="-mt-14 flex flex-col gap-5 sm:-mt-16 sm:flex-row sm:items-end sm:justify-between">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
+              <div className="relative w-fit">
+                <ProfileAvatar
+                  src={profile.avatarUrl}
+                  name={profile.displayName || profile.username}
+                />
+
+                {isOwnProfile && (
+                  <>
+                    <button
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={uploadingAvatar}
+                      className="absolute bottom-1 right-1 flex h-10 w-10 items-center justify-center rounded-full border-2 border-[#100c1a] bg-purple-600 text-white transition hover:bg-purple-500 disabled:opacity-60"
+                      title="Change profile picture"
+                    >
+                      {uploadingAvatar ? (
+                        <LoaderCircle size={17} className="animate-spin" />
+                      ) : (
+                        <Camera size={17} />
+                      )}
+                    </button>
+
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={handleAvatarUpload}
+                    />
+                  </>
+                )}
+              </div>
+
+              <div className="pb-1">
+                <h1 className="text-2xl font-black text-white sm:text-3xl">
+                  {profile.displayName || profile.username}
+                </h1>
+
+                <p className="mt-1 text-sm text-purple-400">
+                  @{profile.username}
+                </p>
+
+                <p className="mt-2 text-xs text-gray-500">
+                  Member since {joinedDate}
+                </p>
+              </div>
+            </div>
+
+            {isOwnProfile && (
+              <div className="flex flex-wrap gap-2">
+                {!editing ? (
+                  <button
+                    onClick={() => {
+                      setEditing(true)
+                      setError('')
+                      setSuccess('')
+                    }}
+                    className="flex items-center gap-2 rounded-xl bg-purple-600 px-5 py-3 text-sm font-bold text-white transition hover:bg-purple-500"
+                  >
+                    <Pencil size={16} />
+                    Edit Profile
+                  </button>
+                ) : (
+                  <button
+                    onClick={cancelEditing}
+                    className="flex items-center gap-2 rounded-xl border border-white/10 px-5 py-3 text-sm font-bold text-gray-300 transition hover:bg-white/5"
+                  >
+                    <X size={16} />
+                    Cancel
+                  </button>
+                )}
+              </div>
+            )}
           </div>
 
-          <h1 className="text-2xl font-black">Create your profile</h1>
-          <p className="mt-2 text-sm leading-6 text-gray-400">
-            Set up your Anime Vault profile so other anime fans can find you.
-          </p>
+          {error && (
+            <div className="mt-6 rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+              {error}
+            </div>
+          )}
 
-          {error && <p className="mt-4 text-sm text-red-300">{error}</p>}
+          {success && (
+            <div className="mt-6 rounded-xl border border-green-500/20 bg-green-500/10 px-4 py-3 text-sm text-green-300">
+              {success}
+            </div>
+          )}
 
-          <button
-            type="button"
-            onClick={() => {
-              setEditing(true)
-              setProfile({
-                id: user.id,
-                username: '',
-                display_name: '',
-                bio: '',
-                avatar_url: '',
-                created_at: new Date().toISOString(),
-              })
-            }}
-            className="mt-6 rounded-xl bg-violet-600 px-5 py-3 text-sm font-bold hover:bg-violet-500"
-          >
-            Set up profile
-          </button>
+          {editing && isOwnProfile ? (
+            <form onSubmit={handleSave} className="mt-8 space-y-5">
+              <div className="grid gap-5 sm:grid-cols-2">
+                <div>
+                  <label className="mb-2 block text-xs font-bold uppercase tracking-wider text-gray-400">
+                    Display Name
+                  </label>
+                  <input
+                    name="displayName"
+                    value={form.displayName}
+                    onChange={handleChange}
+                    maxLength={60}
+                    placeholder="Your display name"
+                    className="w-full rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none transition placeholder:text-gray-600 focus:border-purple-500"
+                  />
+                </div>
 
-          {editing && (
-            <form onSubmit={handleSaveProfile} className="mt-6 space-y-4">
-              <div>
-                <label htmlFor="username" className="mb-2 block text-sm font-medium text-gray-300">
-                  Username
-                </label>
-                <input
-                  id="username"
-                  name="username"
-                  value={form.username}
-                  onChange={handleFormChange}
-                  required
-                  minLength={3}
-                  maxLength={24}
-                  placeholder="anime_fan123"
-                  className="w-full rounded-xl border border-white/10 bg-[#09090f] px-4 py-3 text-sm outline-none focus:border-violet-500"
-                />
+                <div>
+                  <label className="mb-2 block text-xs font-bold uppercase tracking-wider text-gray-400">
+                    Username
+                  </label>
+                  <input
+                    name="username"
+                    value={form.username}
+                    onChange={handleChange}
+                    maxLength={30}
+                    placeholder="yourusername"
+                    className="w-full rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none transition placeholder:text-gray-600 focus:border-purple-500"
+                  />
+                </div>
               </div>
 
               <div>
-                <label htmlFor="display_name" className="mb-2 block text-sm font-medium text-gray-300">
-                  Display name
-                </label>
-                <input
-                  id="display_name"
-                  name="display_name"
-                  value={form.display_name}
-                  onChange={handleFormChange}
-                  maxLength={50}
-                  placeholder="Your display name"
-                  className="w-full rounded-xl border border-white/10 bg-[#09090f] px-4 py-3 text-sm outline-none focus:border-violet-500"
-                />
-              </div>
-
-              <div>
-                <label htmlFor="bio" className="mb-2 block text-sm font-medium text-gray-300">
+                <label className="mb-2 block text-xs font-bold uppercase tracking-wider text-gray-400">
                   Bio
                 </label>
                 <textarea
-                  id="bio"
                   name="bio"
                   value={form.bio}
-                  onChange={handleFormChange}
-                  maxLength={300}
+                  onChange={handleChange}
                   rows={4}
-                  placeholder="Tell other anime fans a little about yourself..."
-                  className="w-full resize-y rounded-xl border border-white/10 bg-[#09090f] px-4 py-3 text-sm outline-none focus:border-violet-500"
+                  maxLength={300}
+                  placeholder="Tell the Anime Vault community about yourself..."
+                  className="w-full resize-none rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none transition placeholder:text-gray-600 focus:border-purple-500"
                 />
+                <p className="mt-1 text-right text-xs text-gray-600">
+                  {form.bio.length}/300
+                </p>
               </div>
 
-              <div>
-                <label htmlFor="avatar_url" className="mb-2 block text-sm font-medium text-gray-300">
-                  Avatar image URL (optional)
-                </label>
-                <input
-                  id="avatar_url"
-                  name="avatar_url"
-                  type="url"
-                  value={form.avatar_url}
-                  onChange={handleFormChange}
-                  placeholder="https://example.com/avatar.jpg"
-                  className="w-full rounded-xl border border-white/10 bg-[#09090f] px-4 py-3 text-sm outline-none focus:border-violet-500"
-                />
+              <div className="grid gap-5 sm:grid-cols-2">
+                <div>
+                  <label className="mb-2 block text-xs font-bold uppercase tracking-wider text-gray-400">
+                    Website
+                  </label>
+                  <input
+                    name="website"
+                    value={form.website}
+                    onChange={handleChange}
+                    placeholder="https://example.com"
+                    className="w-full rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none transition placeholder:text-gray-600 focus:border-purple-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="mb-2 block text-xs font-bold uppercase tracking-wider text-gray-400">
+                    Favorite Anime
+                  </label>
+                  <input
+                    name="favoriteAnime"
+                    value={form.favoriteAnime}
+                    onChange={handleChange}
+                    maxLength={100}
+                    placeholder="Your favorite anime"
+                    className="w-full rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none transition placeholder:text-gray-600 focus:border-purple-500"
+                  />
+                </div>
               </div>
 
               <button
                 type="submit"
                 disabled={saving}
-                className="inline-flex items-center gap-2 rounded-xl bg-violet-600 px-5 py-3 text-sm font-bold hover:bg-violet-500 disabled:opacity-50"
+                className="flex items-center justify-center gap-2 rounded-xl bg-purple-600 px-6 py-3 text-sm font-bold text-white transition hover:bg-purple-500 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {saving ? <LoaderCircle size={17} className="animate-spin" /> : <Check size={17} />}
-                {saving ? 'Saving...' : 'Create profile'}
+                {saving ? (
+                  <LoaderCircle size={17} className="animate-spin" />
+                ) : (
+                  <Check size={17} />
+                )}
+                {saving ? 'Saving...' : 'Save Changes'}
               </button>
             </form>
+          ) : (
+            <div className="mt-7">
+              <p className="max-w-3xl whitespace-pre-wrap text-sm leading-7 text-gray-300">
+                {profile.bio || 'This user has not added a bio yet.'}
+              </p>
+
+              <div className="mt-5 flex flex-wrap gap-4">
+                {profile.website && (
+                  <a
+                    href={
+                      /^https?:\/\//i.test(profile.website)
+                        ? profile.website
+                        : `https://${profile.website}`
+                    }
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-2 text-sm text-purple-400 transition hover:text-purple-300"
+                  >
+                    <Globe size={16} />
+                    Website
+                    <ExternalLink size={13} />
+                  </a>
+                )}
+
+                {profile.favoriteAnime && (
+                  <div className="flex items-center gap-2 text-sm text-gray-400">
+                    <Heart size={16} className="text-pink-400" />
+                    Favorite anime: {profile.favoriteAnime}
+                  </div>
+                )}
+              </div>
+            </div>
           )}
         </div>
       </div>
-    )
-  }
 
-  const displayName = profile.display_name || profile.username || 'Anime fan'
+      <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <ProfileStat
+          icon={CalendarDays}
+          label="Member Since"
+          value={joinedDate}
+        />
 
-  return (
-    <div className="min-h-screen bg-[#09090f] px-4 py-8 text-white sm:px-6 lg:px-10">
-      <div className="mx-auto max-w-6xl">
-        <section className="relative mb-8 overflow-hidden rounded-3xl border border-violet-400/20 bg-gradient-to-br from-violet-950/80 via-[#171329] to-[#10101a]">
-          <div className="absolute -right-16 -top-24 h-72 w-72 rounded-full bg-violet-500/20 blur-3xl" />
-          <div className="absolute -bottom-24 left-1/3 h-60 w-60 rounded-full bg-fuchsia-600/10 blur-3xl" />
+        <ProfileStat
+          icon={Film}
+          label="Anime Community"
+          value="Anime Vault"
+        />
 
-          <div className="relative px-6 pb-7 pt-8 sm:px-10 sm:pt-10">
-            <div className="flex flex-col gap-6 sm:flex-row sm:items-end">
-              <ProfileAvatar src={profile.avatar_url} name={displayName} />
+        <ProfileStat
+          icon={Heart}
+          label="Favorite Anime"
+          value={profile.favoriteAnime ? 'Added' : 'Not added'}
+        />
+      </div>
 
-              <div className="min-w-0 flex-1">
-                <p className="mb-2 text-xs font-bold uppercase tracking-[0.2em] text-violet-300">
-                  Anime Vault member
-                </p>
-                <h1 className="break-words text-3xl font-black sm:text-4xl">
-                  {displayName}
-                </h1>
-                {profile.username && (
-                  <p className="mt-1 text-sm text-gray-400">@{profile.username}</p>
-                )}
-                <p className="mt-3 max-w-2xl whitespace-pre-wrap break-words text-sm leading-6 text-gray-300">
-                  {profile.bio || 'This anime fan has not added a bio yet.'}
-                </p>
-                <p className="mt-3 flex items-center gap-2 text-xs text-gray-500">
-                  <CalendarDays size={14} />
-                  {formatDate(profile.created_at)}
-                </p>
-              </div>
-
-              <div className="flex flex-wrap gap-2">
-                {isOwnProfile ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setError('')
-                      setNotice('')
-                      setEditing(true)
-                    }}
-                    className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-bold transition hover:bg-white/10"
-                  >
-                    <Pencil size={16} />
-                    Edit profile
-                  </button>
-                ) : user ? (
-                  <button
-                    type="button"
-                    onClick={handleSubscription}
-                    disabled={subscribing}
-                    className={`inline-flex items-center gap-2 rounded-xl px-4 py-3 text-sm font-bold transition disabled:opacity-50 ${
-                      isSubscribed
-                        ? 'border border-white/10 bg-white/5 text-gray-200 hover:border-red-400/30 hover:text-red-300'
-                        : 'bg-violet-600 text-white hover:bg-violet-500'
-                    }`}
-                  >
-                    {subscribing ? (
-                      <LoaderCircle size={16} className="animate-spin" />
-                    ) : isSubscribed ? (
-                      <UserCheck size={16} />
-                    ) : (
-                      <UserPlus size={16} />
-                    )}
-                    {subscribing ? 'Please wait...' : isSubscribed ? 'Subscribed' : 'Subscribe'}
-                  </button>
-                ) : (
-                  <Link
-                    to="/login"
-                    className="inline-flex items-center gap-2 rounded-xl bg-violet-600 px-4 py-3 text-sm font-bold hover:bg-violet-500"
-                  >
-                    <UserPlus size={16} />
-                    Sign in to subscribe
-                  </Link>
-                )}
-              </div>
-            </div>
-          </div>
-        </section>
-
-        {(error || notice) && (
-          <div
-            className={`mb-6 rounded-xl border p-4 text-sm ${
-              error
-                ? 'border-red-500/20 bg-red-500/10 text-red-300'
-                : 'border-violet-400/20 bg-violet-500/10 text-violet-200'
-            }`}
-          >
-            {error || notice}
-          </div>
-        )}
-
-        <div className="mb-8 grid grid-cols-2 gap-3 sm:grid-cols-3">
-          <div className="rounded-2xl border border-white/10 bg-[#12121c] p-5">
-            <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-xl bg-violet-500/10 text-violet-300">
-              <Users size={20} />
-            </div>
-            <p className="text-2xl font-black">{followerCount}</p>
-            <p className="mt-1 text-sm text-gray-400">Subscribers</p>
-          </div>
-
-          <div className="rounded-2xl border border-white/10 bg-[#12121c] p-5">
-            <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-xl bg-fuchsia-500/10 text-fuchsia-300">
-              <UserRound size={20} />
-            </div>
-            <p className="text-2xl font-black">{followingCount}</p>
-            <p className="mt-1 text-sm text-gray-400">Following</p>
-          </div>
-
-          <div className="col-span-2 rounded-2xl border border-white/10 bg-[#12121c] p-5 sm:col-span-1">
-            <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-xl bg-amber-500/10 text-amber-300">
-              <Clapperboard size={20} />
-            </div>
-            <p className="text-2xl font-black">{savedCount}</p>
-            <p className="mt-1 text-sm text-gray-400">Saved anime</p>
+      <div className="mt-8">
+        <div className="mb-4 flex items-center justify-between">
+          <div>
+            <h2 className="text-xl font-black text-white">
+              {isOwnProfile
+                ? 'Your Anime Space'
+                : `${profile.displayName || profile.username}'s Anime Space`}
+            </h2>
+            <p className="mt-1 text-sm text-gray-500">
+              Explore Anime Vault content and collections
+            </p>
           </div>
         </div>
 
-        {editing && isOwnProfile && (
-          <section className="mb-8 rounded-3xl border border-white/10 bg-[#12121c] p-6 sm:p-8">
-            <div className="mb-6 flex items-center justify-between gap-4">
-              <div>
-                <h2 className="text-xl font-black">Edit your profile</h2>
-                <p className="mt-1 text-sm text-gray-400">
-                  Update how other anime fans see you.
+        <div className="grid gap-4 sm:grid-cols-2">
+          {isOwnProfile && (
+            <Link
+              to="/my-vault"
+              className="group flex items-center gap-4 rounded-2xl border border-white/10 bg-[#100c1a] p-5 transition hover:border-purple-500/40 hover:bg-purple-500/[0.06]"
+            >
+              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-purple-500/10 text-purple-400 transition group-hover:bg-purple-500/20">
+                <Bookmark size={22} />
+              </div>
+
+              <div className="min-w-0 flex-1">
+                <h3 className="font-bold text-white">My Vault</h3>
+                <p className="mt-1 text-xs text-gray-500">
+                  Your saved anime and personal collections
                 </p>
               </div>
 
-              <button
-                type="button"
-                onClick={() => {
-                  setForm({
-                    username: profile.username ?? '',
-                    display_name: profile.display_name ?? '',
-                    bio: profile.bio ?? '',
-                    avatar_url: profile.avatar_url ?? '',
-                  })
-                  setEditing(false)
-                  setError('')
-                  setNotice('')
-                }}
-                aria-label="Cancel editing"
-                className="rounded-lg p-2 text-gray-400 hover:bg-white/5 hover:text-white"
-              >
-                <X size={20} />
-              </button>
-            </div>
+              <ArrowLeft className="rotate-180 text-gray-600 transition group-hover:text-purple-400" size={18} />
+            </Link>
+          )}
 
-            <form onSubmit={handleSaveProfile} className="space-y-5">
-              <div className="flex flex-col gap-5 sm:flex-row sm:items-center">
-                <ProfileAvatar
-                  src={form.avatar_url}
-                  name={form.display_name || form.username}
-                  size="small"
-                />
-
-                <div className="flex flex-wrap items-center gap-3">
-                  <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-semibold transition hover:bg-white/10">
-                    <Camera size={17} />
-                    {uploadingAvatar ? 'Uploading...' : 'Upload avatar'}
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={handleAvatarUpload}
-                      disabled={uploadingAvatar}
-                      className="hidden"
-                    />
-                  </label>
-                  <span className="text-xs text-gray-500">Image up to 3 MB</span>
-                </div>
-              </div>
-
-              <div className="grid gap-5 sm:grid-cols-2">
-                <div>
-                  <label htmlFor="edit-username" className="mb-2 block text-sm font-medium text-gray-300">
-                    Username
-                  </label>
-                  <input
-                    id="edit-username"
-                    name="username"
-                    value={form.username}
-                    onChange={handleFormChange}
-                    required
-                    minLength={3}
-                    maxLength={24}
-                    className="w-full rounded-xl border border-white/10 bg-[#09090f] px-4 py-3 text-sm outline-none focus:border-violet-500"
-                  />
-                  <p className="mt-2 text-xs text-gray-500">
-                    3–24 letters, numbers, or underscores.
-                  </p>
-                </div>
-
-                <div>
-                  <label htmlFor="edit-display-name" className="mb-2 block text-sm font-medium text-gray-300">
-                    Display name
-                  </label>
-                  <input
-                    id="edit-display-name"
-                    name="display_name"
-                    value={form.display_name}
-                    onChange={handleFormChange}
-                    maxLength={50}
-                    placeholder="Your display name"
-                    className="w-full rounded-xl border border-white/10 bg-[#09090f] px-4 py-3 text-sm outline-none focus:border-violet-500"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label htmlFor="edit-bio" className="mb-2 block text-sm font-medium text-gray-300">
-                  Bio
-                </label>
-                <textarea
-                  id="edit-bio"
-                  name="bio"
-                  value={form.bio}
-                  onChange={handleFormChange}
-                  maxLength={300}
-                  rows={4}
-                  placeholder="What anime do you enjoy?"
-                  className="w-full resize-y rounded-xl border border-white/10 bg-[#09090f] px-4 py-3 text-sm outline-none focus:border-violet-500"
-                />
-                <p className="mt-2 text-right text-xs text-gray-500">
-                  {form.bio.length}/300
-                </p>
-              </div>
-
-              <div>
-                <label htmlFor="edit-avatar-url" className="mb-2 block text-sm font-medium text-gray-300">
-                  Avatar URL
-                </label>
-                <input
-                  id="edit-avatar-url"
-                  name="avatar_url"
-                  type="url"
-                  value={form.avatar_url}
-                  onChange={handleFormChange}
-                  placeholder="https://example.com/avatar.jpg"
-                  className="w-full rounded-xl border border-white/10 bg-[#09090f] px-4 py-3 text-sm outline-none focus:border-violet-500"
-                />
-              </div>
-
-              <div className="flex flex-wrap gap-3">
-                <button
-                  type="submit"
-                  disabled={saving || uploadingAvatar}
-                  className="inline-flex items-center gap-2 rounded-xl bg-violet-600 px-5 py-3 text-sm font-bold transition hover:bg-violet-500 disabled:opacity-50"
-                >
-                  {saving ? (
-                    <LoaderCircle size={17} className="animate-spin" />
-                  ) : (
-                    <Check size={17} />
-                  )}
-                  {saving ? 'Saving...' : 'Save changes'}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={loadProfile}
-                  className="inline-flex items-center gap-2 rounded-xl border border-white/10 px-5 py-3 text-sm font-semibold text-gray-300 hover:bg-white/5"
-                >
-                  <RefreshCw size={16} />
-                  Reload profile
-                </button>
-              </div>
-            </form>
-          </section>
-        )}
-
-        <section className="rounded-3xl border border-white/10 bg-[#12121c] p-6 sm:p-8">
-          <div className="mb-4 flex items-center gap-3">
-            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-violet-500/10 text-violet-300">
+          <Link
+            to="/explore"
+            className="group flex items-center gap-4 rounded-2xl border border-white/10 bg-[#100c1a] p-5 transition hover:border-purple-500/40 hover:bg-purple-500/[0.06]"
+          >
+            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-fuchsia-500/10 text-fuchsia-400 transition group-hover:bg-fuchsia-500/20">
               <Clapperboard size={22} />
             </div>
-            <div>
-              <h2 className="text-xl font-black">
-                {isOwnProfile ? 'Your anime collection' : `${displayName}'s profile`}
-              </h2>
-              <p className="mt-1 text-sm text-gray-400">
-                {isOwnProfile
-                  ? 'Keep exploring and saving anime to your vault.'
-                  : 'Check out Anime Vault and build your own collection.'}
+
+            <div className="min-w-0 flex-1">
+              <h3 className="font-bold text-white">Explore Anime</h3>
+              <p className="mt-1 text-xs text-gray-500">
+                Discover your next favorite anime
               </p>
             </div>
-          </div>
 
-          <div className="flex flex-wrap gap-3">
-            {isOwnProfile && (
-              <Link
-                to="/my-vault"
-                className="inline-flex items-center gap-2 rounded-xl bg-violet-600 px-5 py-3 text-sm font-bold transition hover:bg-violet-500"
-              >
-                <Clapperboard size={17} />
-                Open My Vault
-              </Link>
-            )}
+            <ArrowLeft className="rotate-180 text-gray-600 transition group-hover:text-purple-400" size={18} />
+          </Link>
 
+          {isOwnProfile && profile.id && (
             <Link
-              to="/explore"
-              className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-5 py-3 text-sm font-semibold transition hover:bg-white/10"
+              to={`/channel/${profile.id}`}
+              className="group flex items-center gap-4 rounded-2xl border border-white/10 bg-[#100c1a] p-5 transition hover:border-purple-500/40 hover:bg-purple-500/[0.06]"
             >
-              Explore anime
+              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-purple-500/10 text-purple-400 transition group-hover:bg-purple-500/20">
+                <UserRound size={22} />
+              </div>
+
+              <div className="min-w-0 flex-1">
+                <h3 className="font-bold text-white">Your Channel</h3>
+                <p className="mt-1 text-xs text-gray-500">
+                  View your published Shorts and channel details
+                </p>
+              </div>
+
+              <ArrowLeft className="rotate-180 text-gray-600 transition group-hover:text-purple-400" size={18} />
             </Link>
-          </div>
-        </section>
+          )}
+        </div>
       </div>
     </div>
   )

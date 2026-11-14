@@ -1,3 +1,4 @@
+
 import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
@@ -14,39 +15,38 @@ function formatDate(dateString) {
 
   if (Number.isNaN(date.getTime())) return ''
 
-  const difference = date.getTime() - Date.now()
-  const minutes = Math.round(difference / 60000)
+  const difference = Date.now() - date.getTime()
+  const minutes = Math.floor(difference / 60000)
 
   const formatter = new Intl.RelativeTimeFormat('en', {
     numeric: 'auto',
   })
 
-  if (Math.abs(minutes) < 60) {
-    return formatter.format(minutes, 'minute')
+  if (minutes < 1) return 'Just now'
+
+  if (minutes < 60) {
+    return formatter.format(-minutes, 'minute')
   }
 
-  const hours = Math.round(minutes / 60)
+  const hours = Math.floor(minutes / 60)
 
-  if (Math.abs(hours) < 24) {
-    return formatter.format(hours, 'hour')
+  if (hours < 24) {
+    return formatter.format(-hours, 'hour')
   }
 
-  const days = Math.round(hours / 24)
+  const days = Math.floor(hours / 24)
 
-  if (Math.abs(days) < 30) {
-    return formatter.format(days, 'day')
+  if (days < 30) {
+    return formatter.format(-days, 'day')
   }
 
-  const months = Math.round(days / 30)
+  const months = Math.floor(days / 30)
 
-  if (Math.abs(months) < 12) {
-    return formatter.format(months, 'month')
+  if (months < 12) {
+    return formatter.format(-months, 'month')
   }
 
-  return formatter.format(
-    Math.round(months / 12),
-    'year'
-  )
+  return formatter.format(-Math.floor(months / 12), 'year')
 }
 
 export default function CommentItem({
@@ -58,42 +58,6 @@ export default function CommentItem({
   const [showMenu, setShowMenu] = useState(false)
   const menuRef = useRef(null)
 
-  if (!comment) return null
-
-  const authorId = comment.user_id
-  const content = comment.content ?? ''
-
-  // Supabase may return the related profile as an object or array.
-  const rawProfile = comment.profiles ?? comment.profile ?? {}
-
-  const profile = Array.isArray(rawProfile)
-    ? rawProfile[0] ?? {}
-    : rawProfile
-
-  const username =
-    profile.username?.trim() ||
-    comment.username?.trim() ||
-    'Anime fan'
-
-  const avatarUrl =
-    profile.avatar_url ||
-    comment.avatar_url ||
-    null
-
-  const isOwner = Boolean(
-    currentUserId &&
-    authorId &&
-    currentUserId === authorId
-  )
-
-  const createdAt = comment.created_at
-    ? new Date(comment.created_at)
-    : null
-
-  const validDate =
-    createdAt && !Number.isNaN(createdAt.getTime())
-
-  // Close the options menu when clicking outside it.
   useEffect(() => {
     if (!showMenu) return undefined
 
@@ -122,6 +86,43 @@ export default function CommentItem({
       document.removeEventListener('keydown', handleEscape)
     }
   }, [showMenu])
+
+  if (!comment) return null
+
+  const authorId = comment.user_id
+  const content = comment.content ?? ''
+
+  const rawProfile = comment.profiles ?? comment.profile ?? {}
+
+  const profile = Array.isArray(rawProfile)
+    ? rawProfile[0] ?? {}
+    : rawProfile
+
+  const username =
+    profile.username?.trim() ||
+    profile.display_name?.trim() ||
+    comment.username?.trim() ||
+    comment.display_name?.trim() ||
+    'Anime fan'
+
+  const avatarUrl =
+    profile.avatar_url ||
+    profile.avatar ||
+    comment.avatar_url ||
+    null
+
+  const isOwner = Boolean(
+    currentUserId &&
+    authorId &&
+    currentUserId === authorId
+  )
+
+  const createdAt = comment.created_at
+    ? new Date(comment.created_at)
+    : null
+
+  const validDate =
+    createdAt && !Number.isNaN(createdAt.getTime())
 
   async function handleDelete() {
     if (!onDelete || !isOwner || isDeleting) return
@@ -156,7 +157,6 @@ export default function CommentItem({
 
   return (
     <article className="flex gap-3 py-3">
-      {/* Profile picture */}
       {authorId ? (
         <Link
           to={`/profile/${authorId}`}
@@ -169,7 +169,6 @@ export default function CommentItem({
         avatar
       )}
 
-      {/* Comment content */}
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
           {authorId ? (
@@ -201,7 +200,6 @@ export default function CommentItem({
         </p>
       </div>
 
-      {/* Delete options — only visible to the comment owner */}
       {isOwner && onDelete && (
         <div
           ref={menuRef}

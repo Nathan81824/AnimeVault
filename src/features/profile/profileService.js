@@ -1,178 +1,314 @@
 
-import { supabase } from '../../lib/supabase'
+import { supabase } from "../../lib/supabase";
 
-const PROFILE_TABLE = 'profiles'
+const getClient = () => {
+  if (!supabase) {
+    throw new Error(
+      "Supabase is not configured. Check your .env file."
+    );
+  }
 
-function normalizeProfile(profile) {
-  if (!profile) return null
+  return supabase;
+};
+
+const PROFILE_TABLE = "profiles";
+
+const normalizeProfile = (profile) => {
+  if (!profile) return null;
 
   return {
-    ...profile,
     id: profile.id,
-    username: profile.username ?? '',
-    display_name: profile.display_name ?? '',
-    avatar_url: profile.avatar_url ?? null,
-    bio: profile.bio ?? '',
-    website: profile.website ?? '',
+    username: profile.username || "",
+    displayName: profile.display_name || "",
+    avatarUrl: profile.avatar_url || null,
+    bannerUrl: profile.banner_url || null,
+    bio: profile.bio || "",
+    website: profile.website || "",
+    favoriteAnime: profile.favorite_anime || "",
+    createdAt: profile.created_at || null,
+    updatedAt: profile.updated_at || null,
+  };
+};
+
+const getUserMetadata = (user) => {
+  return user?.user_metadata || {};
+};
+
+const getUsername = (user, initialData = {}) => {
+  const metadata = getUserMetadata(user);
+
+  const suppliedUsername =
+    initialData.username ||
+    user?.username ||
+    metadata.username;
+
+  if (suppliedUsername?.trim()) {
+    return suppliedUsername.trim();
   }
-}
 
-export const profileService = {
-  /**
-   * Get a user's profile by their Supabase Auth ID.
-   */
-  async getProfile(userId) {
-    if (!userId) {
-      return { data: null, error: new Error('User ID is required') }
-    }
+  const emailPrefix = user?.email?.split("@")[0];
 
-    const { data, error } = await supabase
-      .from(PROFILE_TABLE)
-      .select('*')
-      .eq('id', userId)
-      .maybeSingle()
+  if (emailPrefix?.trim()) {
+    return `${emailPrefix.trim()}-${user.id.slice(0, 6)}`;
+  }
 
-    if (error) {
-      console.error('Failed to fetch profile:', error)
-      return { data: null, error }
-    }
+  return `user-${user.id.slice(0, 8)}`;
+};
 
-    return { data: normalizeProfile(data), error: null }
-  },
+const getFavoriteAnime = (user, initialData = {}) => {
+  const metadata = getUserMetadata(user);
 
-  /**
-   * Create a profile if one does not already exist.
-   */
-  async createProfile(user, initialData = {}) {
-    if (!user?.id) {
-      return { data: null, error: new Error('Authenticated user is required') }
-    }
+  return (
+    initialData.favorite_anime ??
+    initialData.favoriteAnime ??
+    user?.favoriteAnime ??
+    metadata.favorite_anime ??
+    ""
+  );
+};
 
-    const metadata = user.user_metadata ?? {}
+const getErrorMessage = (error) => {
+  return (
+    error?.message ||
+    "Something went wrong while managing your profile."
+  );
+};
 
-    const username =
-      initialData.username ??
-      metadata.username ??
-      user.email?.split('@')[0] ??
-      `user_${user.id.slice(0, 8)}`
+const buildProfileData = (user, initialData = {}) => {
+  const metadata = getUserMetadata(user);
+  const username = getUsername(user, initialData);
 
-    const profileData = {
-      id: user.id,
+  return {
+    id: user.id,
+    username,
+    display_name:
+      initialData.display_name ||
+      initialData.displayName ||
+      user?.name ||
+      metadata.display_name ||
+      metadata.full_name ||
       username,
-      display_name:
-        initialData.display_name ??
-        metadata.display_name ??
-        metadata.full_name ??
-        username,
-      avatar_url:
-        initialData.avatar_url ??
-        metadata.avatar_url ??
-        metadata.picture ??
-        null,
-      bio: initialData.bio ?? '',
-      website: initialData.website ?? '',
-    }
+    avatar_url:
+      initialData.avatar_url ??
+      initialData.avatarUrl ??
+      user?.avatarUrl ??
+      metadata.avatar_url ??
+      metadata.picture ??
+      null,
+    banner_url:
+      initialData.banner_url ??
+      initialData.bannerUrl ??
+      null,
+    bio: initialData.bio || "",
+    website: initialData.website || "",
+    favorite_anime: getFavoriteAnime(user, initialData),
+    updated_at: new Date().toISOString(),
+  };
+};
 
-    const { data, error } = await supabase
-      .from(PROFILE_TABLE)
-      .upsert(profileData, { onConflict: 'id' })
-      .select('*')
-      .single()
+const profileService = {
+  async getProfile(userId) {
+    try {
+      const client = getClient();
 
-    if (error) {
-      console.error('Failed to create profile:', error)
-      return { data: null, error }
-    }
+      if (!userId) {
+        return {
+          data: null,
+          error: new Error("A user ID is required."),
+        };
+      }
 
-    return { data: normalizeProfile(data), error: null }
-  },
+      const { data, error } = await client
+        .from(PROFILE_TABLE)
+        .select("*")
+        .eq("id", userId)
+        .maybeSingle();
 
-  /**
-   * Get the profile, creating it if it doesn't exist.
-   */
-  async getOrCreateProfile(user) {
-    if (!user?.id) {
-      return { data: null, error: new Error('Authenticated user is required') }
-    }
+      if (error) {
+        return {
+          data: null,
+          error,
+        };
+      }
 
-    const result = await this.getProfile(user.id)
-
-    if (result.error) {
-      return result
-    }
-
-    if (result.data) {
-      return result
-    }
-
-    return this.createProfile(user)
-  },
-
-  /**
-   * Update the current user's profile.
-   */
-  async updateProfile(userId, updates = {}) {
-    if (!userId) {
-      return { data: null, error: new Error('User ID is required') }
-    }
-
-    const allowedFields = [
-      'username',
-      'display_name',
-      'avatar_url',
-      'bio',
-      'website',
-    ]
-
-    const safeUpdates = Object.fromEntries(
-      Object.entries(updates).filter(
-        ([key, value]) =>
-          allowedFields.includes(key) && value !== undefined
-      )
-    )
-
-    if (Object.keys(safeUpdates).length === 0) {
+      return {
+        data: normalizeProfile(data),
+        error: null,
+      };
+    } catch (error) {
       return {
         data: null,
-        error: new Error('No valid profile fields were provided'),
+        error,
+      };
+    }
+  },
+
+  async createProfile(user, initialData = {}) {
+    try {
+      const client = getClient();
+
+      if (!user?.id) {
+        return {
+          data: null,
+          error: new Error("A valid user is required."),
+        };
       }
+
+      const profileData = buildProfileData(
+        user,
+        initialData
+      );
+
+      const { data, error } = await client
+        .from(PROFILE_TABLE)
+        .upsert(profileData, {
+          onConflict: "id",
+        })
+        .select()
+        .single();
+
+      if (error) {
+        return {
+          data: null,
+          error,
+        };
+      }
+
+      return {
+        data: normalizeProfile(data),
+        error: null,
+      };
+    } catch (error) {
+      return {
+        data: null,
+        error,
+      };
     }
-
-    const { data, error } = await supabase
-      .from(PROFILE_TABLE)
-      .update(safeUpdates)
-      .eq('id', userId)
-      .select('*')
-      .single()
-
-    if (error) {
-      console.error('Failed to update profile:', error)
-      return { data: null, error }
-    }
-
-    return { data: normalizeProfile(data), error: null }
   },
 
-  /**
-   * Delete a user's profile.
-   */
+  async getOrCreateProfile(user) {
+    if (!user?.id) {
+      return {
+        data: null,
+        error: new Error("A valid user is required."),
+      };
+    }
+
+    const existingProfile = await this.getProfile(user.id);
+
+    if (existingProfile.error) {
+      return existingProfile;
+    }
+
+    if (existingProfile.data) {
+      return existingProfile;
+    }
+
+    return this.createProfile(user);
+  },
+
+  async updateProfile(userId, profileData = {}) {
+    try {
+      const client = getClient();
+
+      if (!userId) {
+        return {
+          data: null,
+          error: new Error("A user ID is required."),
+        };
+      }
+
+      const allowedFields = {
+        username: profileData.username,
+        display_name:
+          profileData.display_name ??
+          profileData.displayName,
+        avatar_url:
+          profileData.avatar_url ??
+          profileData.avatarUrl,
+        banner_url:
+          profileData.banner_url ??
+          profileData.bannerUrl,
+        bio: profileData.bio,
+        website: profileData.website,
+        favorite_anime:
+          profileData.favorite_anime ??
+          profileData.favoriteAnime,
+      };
+
+      const updates = Object.fromEntries(
+        Object.entries(allowedFields).filter(
+          ([, value]) => value !== undefined
+        )
+      );
+
+      if (Object.keys(updates).length === 0) {
+        return this.getProfile(userId);
+      }
+
+      updates.updated_at = new Date().toISOString();
+
+      const { data, error } = await client
+        .from(PROFILE_TABLE)
+        .update(updates)
+        .eq("id", userId)
+        .select()
+        .single();
+
+      if (error) {
+        return {
+          data: null,
+          error,
+        };
+      }
+
+      return {
+        data: normalizeProfile(data),
+        error: null,
+      };
+    } catch (error) {
+      return {
+        data: null,
+        error,
+      };
+    }
+  },
+
   async deleteProfile(userId) {
-    if (!userId) {
-      return { error: new Error('User ID is required') }
+    try {
+      const client = getClient();
+
+      if (!userId) {
+        return {
+          success: false,
+          error: new Error("A user ID is required."),
+        };
+      }
+
+      const { error } = await client
+        .from(PROFILE_TABLE)
+        .delete()
+        .eq("id", userId);
+
+      if (error) {
+        return {
+          success: false,
+          error,
+        };
+      }
+
+      return {
+        success: true,
+        error: null,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error,
+      };
     }
-
-    const { error } = await supabase
-      .from(PROFILE_TABLE)
-      .delete()
-      .eq('id', userId)
-
-    if (error) {
-      console.error('Failed to delete profile:', error)
-      return { error }
-    }
-
-    return { error: null }
   },
-}
+};
 
-export default profileService
+export { normalizeProfile };
+export default profileService;

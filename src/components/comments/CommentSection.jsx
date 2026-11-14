@@ -1,14 +1,15 @@
+
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   MessageCircle,
   Send,
   LoaderCircle,
-  UserRound,
   X,
 } from 'lucide-react'
 
-import { supabase } from '../../lib/supabase'
 import { useAuthStore } from '../../features/auth/authStore'
+import socialService from '../../services/social'
+import CommentItem from './CommentItem'
 
 const MAX_COMMENT_LENGTH = 1000
 
@@ -20,12 +21,15 @@ export default function CommentSection({ shortId, onClose }) {
   const [text, setText] = useState('')
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
+  const [deletingId, setDeletingId] = useState(null)
+  const [likingIds, setLikingIds] = useState([])
   const [error, setError] = useState('')
   const [successMessage, setSuccessMessage] = useState('')
 
+  const mountedRef = useRef(false)
   const requestIdRef = useRef(0)
   const submittingRef = useRef(false)
-  const mountedRef = useRef(false)
+  const likingIdsRef = useRef(new Set())
 
   useEffect(() => {
     mountedRef.current = true
@@ -42,7 +46,6 @@ export default function CommentSection({ shortId, onClose }) {
     if (!shortId) {
       setComments([])
       setLoading(false)
-      setError('')
       return
     }
 
@@ -50,28 +53,8 @@ export default function CommentSection({ shortId, onClose }) {
     setError('')
 
     try {
-      const { data, error: queryError } = await supabase
-        .from('short_comments')
-        .select(`
-          id,
-          short_id,
-          user_id,
-          content,
-          created_at,
-          profiles (
-            id,
-            username,
-            avatar_url
-          )
-        `)
-        .eq('short_id', shortId)
-        .order('created_at', { ascending: false })
+      const data = await socialService.getComments(shortId)
 
-      if (queryError) {
-        throw queryError
-      }
-
-      // Ignore stale requests if the user has switched to another Short.
       if (
         !mountedRef.current ||
         requestId !== requestIdRef.current
@@ -87,7 +70,8 @@ export default function CommentSection({ shortId, onClose }) {
         mountedRef.current &&
         requestId === requestIdRef.current
       ) {
-        setError('Could not load comments. Please try again.')
+        setError(err.message || 'Could not load comments.')
+        setComments([])
       }
     } finally {
       if (
@@ -100,9 +84,12 @@ export default function CommentSection({ shortId, onClose }) {
   }, [shortId])
 
   useEffect(() => {
+    setComments([])
     setText('')
     setError('')
     setSuccessMessage('')
+    setLikingIds([])
+    likingIdsRef.current.clear()
     loadComments()
   }, [loadComments])
 
@@ -121,17 +108,11 @@ export default function CommentSection({ shortId, onClose }) {
       return
     }
 
-    if (!shortId) {
-      setError('This Short could not be identified.')
-      return
-    }
-
     if (!userId) {
       setError('Please sign in to post a comment.')
       return
     }
 
-    // Prevent rapid duplicate submissions.
     if (submittingRef.current) return
 
     submittingRef.current = true
@@ -140,30 +121,22 @@ export default function CommentSection({ shortId, onClose }) {
     setSuccessMessage('')
 
     try {
-      const { error: insertError } = await supabase
-        .from('short_comments')
-        .insert({
-          short_id: shortId,
-          user_id: userId,
-          content,
-        })
-
-      if (insertError) {
-        throw insertError
-      }
+      const newComment = await socialService.addComment(
+        shortId,
+        content,
+      )
 
       if (!mountedRef.current) return
 
+      setComments((previous) => [newComment, ...previous])
       setText('')
       setSuccessMessage('Comment posted.')
-
-      await loadComments()
     } catch (err) {
       console.error('Could not submit comment:', err)
 
       if (mountedRef.current) {
         setError(
-          'Could not post your comment. Please try again.'
+          err.message || 'Could not post your comment. Please try again.',
         )
       }
     } finally {
@@ -175,19 +148,78 @@ export default function CommentSection({ shortId, onClose }) {
     }
   }
 
-  const formatDate = (date) => {
-    if (!date) return ''
-
-    const timestamp = new Date(date)
-
-    if (Number.isNaN(timestamp.getTime())) {
-      return ''
+  const handleLike = async (commentId) => {
+    if (!commentId || !userId || likingIdsRef.current.has(commentId)) {
+      return
     }
 
-    return timestamp.toLocaleDateString(undefined, {
-      month: 'short',
-      day: 'numeric',
-    })
+    likingIdsRef.current.add(commentId)
+
+    setLikingIds((previous) => [...previous, commentId])
+    setError('')
+    setSuccessMessage('')
+
+    try {
+      const result = await socialService.toggleCommentLike(commentId)
+
+      if (!mountedRef.current) return
+
+      setComments((previous) =>
+        previous.map((comment) =>
+          comment.id === commentId
+            ? {
+                ...comment,
+                liked_by_user: result.liked,
+                like_count: result.likeCount,
+              }
+            : comment
+        )
+      )
+    } catch (err) {
+      console.error('Could not like comment:', err)
+
+      if (mountedRef.current) {
+        setError(err.message || 'Could not update comment like.')
+      }
+    } finally {
+      likingIdsRef.current.delete(commentId)
+
+      if (mountedRef.current) {
+        setLikingIds((previous) =>
+          previous.filter((id) => id !== commentId)
+        )
+      }
+    }
+  }
+
+  const handleDelete = async (commentId) => {
+    if (!commentId || deletingId) return
+
+    setDeletingId(commentId)
+    setError('')
+    setSuccessMessage('')
+
+    try {
+      await socialService.deleteComment(commentId)
+
+      if (!mountedRef.current) return
+
+      setComments((previous) =>
+        previous.filter((comment) => comment.id !== commentId)
+      )
+
+      setSuccessMessage('Comment deleted.')
+    } catch (err) {
+      console.error('Could not delete comment:', err)
+
+      if (mountedRef.current) {
+        setError(err.message || 'Could not delete comment.')
+      }
+    } finally {
+      if (mountedRef.current) {
+        setDeletingId(null)
+      }
+    }
   }
 
   if (!shortId) return null
@@ -197,20 +229,13 @@ export default function CommentSection({ shortId, onClose }) {
       aria-label="Short comments"
       className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-white/10 bg-vault-surface text-vault-text"
     >
-      {/* Header */}
       <header className="flex shrink-0 items-center justify-between border-b border-white/10 p-4">
         <div className="flex items-center gap-2">
-          <MessageCircle
-            size={20}
-            className="text-vault-accent"
-          />
+          <MessageCircle size={20} className="text-vault-accent" />
 
           <h2 className="font-semibold">Comments</h2>
 
-          <span
-            className="rounded-full bg-white/10 px-2 py-0.5 text-xs text-vault-muted"
-            aria-label={`${comments.length} comments`}
-          >
+          <span className="rounded-full bg-white/10 px-2 py-0.5 text-xs text-vault-muted">
             {comments.length}
           </span>
         </div>
@@ -220,16 +245,15 @@ export default function CommentSection({ shortId, onClose }) {
             type="button"
             onClick={onClose}
             aria-label="Close comments"
-            className="rounded-lg p-2 text-vault-muted transition hover:bg-white/10 hover:text-white"
+            className="rounded-full p-2 text-vault-muted transition hover:bg-white/10 hover:text-vault-text"
           >
-            <X size={18} />
+            <X size={19} />
           </button>
         )}
       </header>
 
-      {/* Comments list */}
       <div
-        className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4"
+        className="min-h-0 flex-1 overflow-y-auto p-4"
         aria-live="polite"
       >
         {loading ? (
@@ -237,19 +261,16 @@ export default function CommentSection({ shortId, onClose }) {
             <LoaderCircle
               size={25}
               className="animate-spin text-vault-accent"
-              aria-label="Loading comments"
             />
           </div>
         ) : error && comments.length === 0 ? (
           <div className="space-y-3 py-6 text-center">
-            <p className="text-sm text-red-400">
-              {error}
-            </p>
+            <p className="text-sm text-red-400">{error}</p>
 
             <button
               type="button"
               onClick={loadComments}
-              className="rounded-lg bg-white/10 px-4 py-2 text-sm transition hover:bg-white/15"
+              className="rounded-lg bg-white/10 px-4 py-2 text-sm hover:bg-white/15"
             >
               Try again
             </button>
@@ -261,92 +282,41 @@ export default function CommentSection({ shortId, onClose }) {
               className="mb-3 text-vault-muted"
             />
 
-            <p className="font-medium">
-              No comments yet
-            </p>
+            <p className="font-medium">No comments yet</p>
 
             <p className="mt-1 text-sm text-vault-muted">
               Start the conversation about this Short.
             </p>
           </div>
         ) : (
-          comments.map((comment) => {
-            const profile = Array.isArray(comment.profiles)
-              ? comment.profiles[0] || {}
-              : comment.profiles || {}
-
-            const username =
-              profile.username?.trim() || 'Anime fan'
-
-            const avatarUrl = profile.avatar_url
-
-            return (
-              <article
+          <div className="divide-y divide-white/5">
+            {comments.map((comment) => (
+              <CommentItem
                 key={comment.id}
-                className="flex items-start gap-3"
-              >
-                {/* Avatar */}
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-vault-purple/20 text-vault-accent">
-                  {avatarUrl ? (
-                    <img
-                      src={avatarUrl}
-                      alt={`${username}'s avatar`}
-                      loading="lazy"
-                      referrerPolicy="no-referrer"
-                      className="h-full w-full object-cover"
-                      onError={(event) => {
-                        event.currentTarget.style.display = 'none'
-                      }}
-                    />
-                  ) : (
-                    <UserRound size={18} />
-                  )}
-                </div>
-
-                {/* Comment content */}
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                    <span className="text-sm font-semibold">
-                      {username}
-                    </span>
-
-                    <time
-                      dateTime={comment.created_at || undefined}
-                      className="text-xs text-vault-muted"
-                    >
-                      {formatDate(comment.created_at)}
-                    </time>
-                  </div>
-
-                  <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-relaxed text-vault-text/90">
-                    {comment.content}
-                  </p>
-                </div>
-              </article>
-            )
-          })
+                comment={comment}
+                currentUserId={userId}
+                onDelete={handleDelete}
+                onLike={handleLike}
+                isDeleting={deletingId === comment.id}
+                isLiking={likingIds.includes(comment.id)}
+              />
+            ))}
+          </div>
         )}
       </div>
 
-      {/* Comment composer */}
       <form
         onSubmit={submitComment}
         className="shrink-0 border-t border-white/10 p-3"
       >
         {error && comments.length > 0 && (
-          <p
-            role="alert"
-            className="mb-2 text-xs text-red-400"
-          >
+          <p role="alert" className="mb-2 text-xs text-red-400">
             {error}
           </p>
         )}
 
         {successMessage && (
-          <p
-            role="status"
-            className="mb-2 text-xs text-green-400"
-          >
+          <p role="status" className="mb-2 text-xs text-green-400">
             {successMessage}
           </p>
         )}
@@ -366,27 +336,17 @@ export default function CommentSection({ shortId, onClose }) {
               setSuccessMessage('')
             }}
             onKeyDown={(event) => {
-              // Enter submits; Shift+Enter creates a new line.
               if (
                 event.key === 'Enter' &&
                 !event.shiftKey &&
                 !event.nativeEvent.isComposing
               ) {
                 event.preventDefault()
-
-                if (
-                  text.trim() &&
-                  userId &&
-                  !submitting
-                ) {
-                  event.currentTarget.form?.requestSubmit()
-                }
+                event.currentTarget.form?.requestSubmit()
               }
             }}
             placeholder={
-              userId
-                ? 'Write a comment...'
-                : 'Sign in to comment'
+              userId ? 'Write a comment...' : 'Sign in to comment'
             }
             aria-label="Write a comment"
             rows={1}
@@ -397,19 +357,12 @@ export default function CommentSection({ shortId, onClose }) {
 
           <button
             type="submit"
-            disabled={
-              !userId ||
-              !text.trim() ||
-              submitting
-            }
+            disabled={!userId || !text.trim() || submitting}
             aria-label="Post comment"
             className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-vault-purple text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
           >
             {submitting ? (
-              <LoaderCircle
-                size={18}
-                className="animate-spin"
-              />
+              <LoaderCircle size={18} className="animate-spin" />
             ) : (
               <Send size={18} />
             )}

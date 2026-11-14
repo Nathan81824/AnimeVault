@@ -1,112 +1,67 @@
 
-import { supabase } from "../../lib/supabase";
+import { supabase } from '../../lib/supabase'
 
 const getClient = () => {
   if (!supabase) {
     throw new Error(
-      "Supabase is not configured. Check your .env file."
-    );
+      'Supabase is not configured. Check your environment variables.'
+    )
   }
 
-  return supabase;
-};
-
-const normalizeUser = (user) => {
-  if (!user) return null;
-
-  const metadata = user.user_metadata || {};
-
-  return {
-    id: user.id,
-    email: user.email || "",
-    name:
-      metadata.display_name ||
-      metadata.full_name ||
-      metadata.username ||
-      "",
-    username: metadata.username || "",
-    avatarUrl:
-      metadata.avatar_url ||
-      metadata.avatarUrl ||
-      metadata.picture ||
-      null,
-    createdAt: user.created_at || null,
-    emailConfirmedAt: user.email_confirmed_at || null,
-  };
-};
-
-const getErrorMessage = (error) => {
-  const message = error?.message || "";
-
-  if (!message) {
-    return "Something went wrong. Please try again.";
-  }
-
-  const normalizedMessage = message.toLowerCase();
-
-  if (normalizedMessage.includes("invalid login credentials")) {
-    return "Incorrect email or password.";
-  }
-
-  if (normalizedMessage.includes("email not confirmed")) {
-    return "Please confirm your email before signing in.";
-  }
-
-  if (normalizedMessage.includes("user already registered")) {
-    return "An account with this email already exists.";
-  }
-
-  if (normalizedMessage.includes("password should be at least")) {
-    return "Your password is too short.";
-  }
-
-  if (normalizedMessage.includes("unable to validate email")) {
-    return "Please enter a valid email address.";
-  }
-
-  if (
-    normalizedMessage.includes("rate limit") ||
-    normalizedMessage.includes("too many requests")
-  ) {
-    return "Too many attempts. Please wait a moment and try again.";
-  }
-
-  if (
-    normalizedMessage.includes("network") ||
-    normalizedMessage.includes("failed to fetch")
-  ) {
-    return "Network error. Check your internet connection.";
-  }
-
-  return message;
-};
+  return supabase
+}
 
 const throwIfError = (error) => {
   if (error) {
-    throw new Error(getErrorMessage(error));
+    console.error('SUPABASE AUTH ERROR:', error)
+    throw error
   }
-};
+}
+
+const normalizeUser = (user) => {
+  if (!user) return null
+
+  const metadata = user.user_metadata || {}
+
+  return {
+    ...user,
+    id: user.id,
+    email: user.email || '',
+    username:
+      metadata.username ||
+      metadata.display_name ||
+      '',
+    display_name:
+      metadata.display_name ||
+      metadata.username ||
+      '',
+    favorite_anime: metadata.favorite_anime || '',
+  }
+}
 
 export const authService = {
-  /**
-   * Register a new user.
-   */
-  async signUp({ email, password, username }) {
-    const client = getClient();
+  async signUp({
+    email,
+    password,
+    username,
+    favoriteAnime,
+  }) {
+    const client = getClient()
 
-    const cleanEmail = email?.trim().toLowerCase();
-    const cleanUsername = username?.trim();
+    const cleanEmail = email?.trim().toLowerCase()
+    const cleanUsername = username?.trim()
+    const cleanFavoriteAnime = favoriteAnime?.trim() || ''
 
     if (!cleanEmail || !password || !cleanUsername) {
       throw new Error(
-        "Username, email, and password are required."
-      );
+        'Username, email, and password are required.'
+      )
     }
 
     if (password.length < 6) {
       throw new Error(
-        "Your password must contain at least 6 characters."
-      );
+        'Your password must contain at least 6 characters.'
+      )
     }
 
     const { data, error } = await client.auth.signUp({
@@ -116,184 +71,186 @@ export const authService = {
         data: {
           username: cleanUsername,
           display_name: cleanUsername,
+          favorite_anime: cleanFavoriteAnime,
         },
       },
-    });
+    })
 
-    throwIfError(error);
+    throwIfError(error)
+
+    if (!data?.user) {
+      throw new Error(
+        'Supabase did not return a user. Please try again.'
+      )
+    }
+
+    const identities = data.user.identities
+
+    console.log('SUPABASE SIGNUP RESPONSE:', {
+      userId: data.user.id,
+      email: data.user.email,
+      hasSession: Boolean(data.session),
+      identitiesCount: identities?.length ?? null,
+    })
+
+    if (Array.isArray(identities) && identities.length === 0) {
+      throw new Error(
+        'This email may already be registered. Try logging in or use another email address.'
+      )
+    }
+
+    const user = normalizeUser(data.user)
+    const session = data.session || null
 
     return {
-      user: normalizeUser(data.user),
-      session: data.session || null,
-      needsEmailConfirmation: !data.session && !!data.user,
-      successMessage: data.session
-        ? "Your account has been created successfully!"
-        : "Your account has been created. Check your email for a confirmation link before signing in.",
-    };
+      user,
+      session,
+      needsEmailConfirmation: !session,
+      success: true,
+      successMessage: session
+        ? 'Your account has been created successfully!'
+        : 'Your account has been created. Check your email for a confirmation link before signing in.',
+    }
   },
 
-  /**
-   * Sign in with email and password.
-   */
   async signIn({ email, password }) {
-    const client = getClient();
+    const client = getClient()
 
-    const cleanEmail = email?.trim().toLowerCase();
+    const cleanEmail = email?.trim().toLowerCase()
 
     if (!cleanEmail || !password) {
-      throw new Error("Email and password are required.");
+      throw new Error(
+        'Email and password are required.'
+      )
     }
 
     const { data, error } =
       await client.auth.signInWithPassword({
         email: cleanEmail,
         password,
-      });
+      })
 
-    throwIfError(error);
+    throwIfError(error)
+
+    if (!data?.user || !data?.session) {
+      throw new Error(
+        'Supabase did not return a valid login session.'
+      )
+    }
 
     return {
       user: normalizeUser(data.user),
-      session: data.session || null,
-    };
+      session: data.session,
+      success: true,
+    }
   },
 
-  /**
-   * Sign out the current user.
-   */
   async signOut() {
-    const client = getClient();
+    const client = getClient()
 
-    const { error } = await client.auth.signOut();
+    const { error } = await client.auth.signOut()
 
-    throwIfError(error);
+    throwIfError(error)
 
-    return { success: true };
+    return true
   },
 
-  /**
-   * Get the current session.
-   */
   async getSession() {
-    const client = getClient();
+    const client = getClient()
 
-    const { data, error } = await client.auth.getSession();
+    const { data, error } = await client.auth.getSession()
 
-    throwIfError(error);
+    throwIfError(error)
 
-    return data.session || null;
+    return data.session || null
   },
 
-  /**
-   * Get the currently authenticated user.
-   */
   async getCurrentUser() {
-    const client = getClient();
+    const client = getClient()
 
-    const { data, error } = await client.auth.getUser();
+    const { data, error } = await client.auth.getUser()
 
-    if (error) {
-      const message = error.message?.toLowerCase() || "";
+    throwIfError(error)
 
-      if (
-        message.includes("session") ||
-        message.includes("auth session missing")
-      ) {
-        return null;
-      }
+    return normalizeUser(data.user)
+  },
 
-      throw new Error(getErrorMessage(error));
+  async updateUserMetadata(metadata) {
+    const client = getClient()
+
+    if (
+      !metadata ||
+      typeof metadata !== 'object' ||
+      Array.isArray(metadata)
+    ) {
+      throw new Error(
+        'Valid user metadata is required.'
+      )
     }
 
-    return normalizeUser(data.user);
+    const { data, error } = await client.auth.updateUser({
+      data: metadata,
+    })
+
+    throwIfError(error)
+
+    return normalizeUser(data.user)
   },
 
-  /**
-   * Send a password reset email.
-   */
-  async resetPassword(email) {
-    const client = getClient();
+  async updateFavoriteAnime(favoriteAnime) {
+    return authService.updateUserMetadata({
+      favorite_anime: favoriteAnime?.trim() || '',
+    })
+  },
 
-    const cleanEmail = email?.trim().toLowerCase();
+  async resetPassword(email) {
+    const client = getClient()
+
+    const cleanEmail = email?.trim().toLowerCase()
 
     if (!cleanEmail) {
-      throw new Error("Please enter your email address.");
+      throw new Error(
+        'Please enter your email address.'
+      )
     }
 
-    const redirectTo =
-      `${window.location.origin}/update-password`;
-
     const { error } =
-      await client.auth.resetPasswordForEmail(cleanEmail, {
-        redirectTo,
-      });
+      await client.auth.resetPasswordForEmail(cleanEmail)
 
-    throwIfError(error);
+    throwIfError(error)
 
-    return {
-      success: true,
-      message:
-        "If an account exists for that email, password reset instructions will be sent.",
-    };
+    return true
   },
 
-  /**
-   * Update the password for the current authenticated user.
-   */
   async updatePassword(password) {
-    const client = getClient();
+    const client = getClient()
 
     if (!password || password.length < 6) {
       throw new Error(
-        "Your new password must contain at least 6 characters."
-      );
+        'Your new password must contain at least 6 characters.'
+      )
     }
 
     const { data, error } = await client.auth.updateUser({
       password,
-    });
+    })
 
-    throwIfError(error);
+    throwIfError(error)
 
-    return {
-      user: normalizeUser(data.user),
-      success: true,
-      message: "Your password has been updated successfully.",
-    };
+    return normalizeUser(data.user)
   },
 
-  /**
-   * Subscribe to authentication changes.
-   * Returns the subscription so the caller can unsubscribe.
-   */
   onAuthStateChange(callback) {
-    const client = getClient();
+    const client = getClient()
 
-    if (typeof callback !== "function") {
+    if (typeof callback !== 'function') {
       throw new Error(
-        "onAuthStateChange requires a callback function."
-      );
+        'Auth state callback must be a function.'
+      )
     }
 
-    const {
-      data: { subscription },
-    } = client.auth.onAuthStateChange((event, session) => {
-      try {
-        callback({
-          event,
-          session: session || null,
-          user: normalizeUser(session?.user || null),
-        });
-      } catch (error) {
-        console.error(
-          "Error handling authentication state change:",
-          error
-        );
-      }
-    });
-
-    return subscription;
+    return client.auth.onAuthStateChange(callback)
   },
-};
+}
 
-export default authService;
+export default authService

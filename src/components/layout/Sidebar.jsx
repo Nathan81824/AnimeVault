@@ -1,5 +1,5 @@
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, NavLink, useNavigate } from 'react-router-dom'
 import {
   Home,
@@ -18,6 +18,8 @@ import {
 } from 'lucide-react'
 import { useAuthStore } from '../../features/auth/authStore'
 
+const SIDEBAR_STORAGE_KEY = 'anime-vault-sidebar-collapsed'
+
 const mainLinks = [
   { label: 'Home', path: '/', icon: Home },
   { label: 'Explore', path: '/explore', icon: Compass },
@@ -26,17 +28,32 @@ const mainLinks = [
 
 const libraryLinks = [
   { label: 'My Vault', path: '/my-vault', icon: Bookmark },
-  { label: 'Subscriptions', path: '/subscriptions', icon: Users },
+  { label: 'Channels', path: '/channels', icon: Users },
 ]
 
 export default function Sidebar() {
-  const [collapsed, setCollapsed] = useState(false)
+  const [collapsed, setCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem(SIDEBAR_STORAGE_KEY) === 'true'
+    } catch {
+      return false
+    }
+  })
+
   const navigate = useNavigate()
 
   const user = useAuthStore((state) => state.user)
   const profile = useAuthStore((state) => state.profile)
   const signOut = useAuthStore((state) => state.signOut)
   const isSubmitting = useAuthStore((state) => state.isSubmitting)
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(SIDEBAR_STORAGE_KEY, String(collapsed))
+    } catch {
+      // Storage may be unavailable.
+    }
+  }, [collapsed])
 
   const displayName =
     profile?.displayName ||

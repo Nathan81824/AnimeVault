@@ -1,3 +1,4 @@
+
 import { useCallback, useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import {
@@ -13,12 +14,14 @@ import {
   RefreshCw,
   Clapperboard,
   ArrowUpDown,
+  Bookmark,
+  Check,
+  LoaderCircle,
 } from "lucide-react";
-import {
-  searchAnime,
-  getPopularAnime,
-  getTrendingAnime,
-} from "../lib/jikan";
+
+import { searchAnime, getPopularAnime, getTrendingAnime } from "../lib/jikan";
+import { supabase } from "../lib/supabase";
+import { useAuthStore } from "../features/auth/authStore";
 
 const genres = [
   { label: "All Genres", value: "" },
@@ -74,16 +77,7 @@ const getScore = (anime) => {
   return Number.isFinite(score) && score > 0 ? score : null;
 };
 
-const formatStatus = (status) => {
-  if (!status) return "Unknown";
-
-  return String(status)
-    .toLowerCase()
-    .replaceAll("_", " ")
-    .replace(/\b\w/g, (letter) => letter.toUpperCase());
-};
-
-function AnimeCard({ anime }) {
+function AnimeCard({ anime, saved, saving, onSave }) {
   const [imageFailed, setImageFailed] = useState(false);
 
   const title = getTitle(anime);
@@ -92,82 +86,100 @@ function AnimeCard({ anime }) {
   const year = getYear(anime);
 
   return (
-    <Link
-      to={`/anime/${anime.id}`}
-      className="group block min-w-0"
-    >
-      <div className="relative aspect-[3/4] overflow-hidden rounded-xl bg-[#191926]">
-        {!imageFailed && image ? (
-          <img
-            src={image}
-            alt={title}
-            loading="lazy"
-            onError={() => setImageFailed(true)}
-            className="h-full w-full object-cover transition duration-500 group-hover:scale-105"
-          />
-        ) : (
-          <div className="flex h-full flex-col items-center justify-center gap-3 p-3 text-center">
-            <Clapperboard
-              size={30}
-              className="text-purple-400"
+    <div className="group min-w-0">
+      <Link to={`/anime/${anime.id}`} className="block">
+        <div className="relative aspect-[3/4] overflow-hidden rounded-xl bg-[#191926]">
+          {!imageFailed && image ? (
+            <img
+              src={image}
+              alt={title}
+              loading="lazy"
+              onError={() => setImageFailed(true)}
+              className="h-full w-full object-cover transition duration-500 group-hover:scale-105"
             />
-            <span className="text-sm font-semibold text-gray-300">
-              {title}
+          ) : (
+            <div className="flex h-full flex-col items-center justify-center gap-3 p-3 text-center">
+              <Clapperboard size={30} className="text-purple-400" />
+              <span className="text-sm font-semibold text-gray-300">
+                {title}
+              </span>
+            </div>
+          )}
+
+          <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-transparent to-black/20 opacity-75 transition group-hover:opacity-100" />
+
+          {score !== null && (
+            <div className="absolute right-2 top-2 flex items-center gap-1 rounded-lg bg-black/75 px-2 py-1 text-xs font-bold text-yellow-300 backdrop-blur">
+              <Star size={12} fill="currentColor" />
+              {(score / 10).toFixed(1)}
+            </div>
+          )}
+
+          {anime.status === "RELEASING" && (
+            <span className="absolute left-2 top-2 rounded-md bg-emerald-500/90 px-2 py-1 text-[10px] font-bold text-white">
+              AIRING
             </span>
+          )}
+
+          {anime.status === "NOT_YET_RELEASED" && (
+            <span className="absolute left-2 top-2 rounded-md bg-purple-600/90 px-2 py-1 text-[10px] font-bold text-white">
+              UPCOMING
+            </span>
+          )}
+
+          <div className="absolute inset-x-0 bottom-0 p-3">
+            <h3 className="line-clamp-2 text-sm font-bold text-white sm:text-base">
+              {title}
+            </h3>
+
+            <p className="mt-1 text-xs text-gray-300">
+              {[
+                year,
+                anime.format,
+                anime.episodes ? `${anime.episodes} eps` : null,
+              ]
+                .filter(Boolean)
+                .join(" · ") || "Anime"}
+            </p>
           </div>
-        )}
-
-        <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-transparent to-black/20 opacity-75 transition group-hover:opacity-100" />
-
-        {score !== null && (
-          <div className="absolute right-2 top-2 flex items-center gap-1 rounded-lg bg-black/75 px-2 py-1 text-xs font-bold text-yellow-300 backdrop-blur">
-            <Star size={12} fill="currentColor" />
-            {(score / 10).toFixed(1)}
-          </div>
-        )}
-
-        {anime.status === "RELEASING" && (
-          <span className="absolute left-2 top-2 rounded-md bg-emerald-500/90 px-2 py-1 text-[10px] font-bold text-white">
-            AIRING
-          </span>
-        )}
-
-        {anime.status === "NOT_YET_RELEASED" && (
-          <span className="absolute left-2 top-2 rounded-md bg-purple-600/90 px-2 py-1 text-[10px] font-bold text-white">
-            UPCOMING
-          </span>
-        )}
-
-        <div className="absolute inset-x-0 bottom-0 p-3">
-          <h3 className="line-clamp-2 text-sm font-bold text-white sm:text-base">
-            {title}
-          </h3>
-
-          <p className="mt-1 text-xs text-gray-300">
-            {[
-              year,
-              anime.format,
-              anime.episodes
-                ? `${anime.episodes} eps`
-                : null,
-            ]
-              .filter(Boolean)
-              .join(" · ") || "Anime"}
-          </p>
         </div>
-      </div>
+      </Link>
 
-      <div className="mt-2 flex flex-wrap gap-1.5">
-        {(anime.genres || []).slice(0, 2).map((genre) => (
-          <span
-            key={genre}
-            className="rounded-md bg-white/5 px-2 py-1 text-[10px] text-gray-400"
-          >
-            {genre}
-          </span>
-        ))}
+      <div className="mt-2 flex items-center justify-between gap-2">
+        <div className="flex min-w-0 flex-wrap gap-1.5">
+          {(anime.genres || []).slice(0, 2).map((genre) => (
+            <span
+              key={genre}
+              className="rounded-md bg-white/5 px-2 py-1 text-[10px] text-gray-400"
+            >
+              {genre}
+            </span>
+          ))}
+        </div>
+
+        <button
+          type="button"
+          onClick={() => onSave(anime)}
+          disabled={saved || saving}
+          title={saved ? "Already in My Vault" : "Save to My Vault"}
+          className={`flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-2 text-xs font-bold transition ${
+            saved
+              ? "bg-emerald-500/10 text-emerald-400"
+              : "bg-purple-600/15 text-purple-300 hover:bg-purple-600 hover:text-white"
+          } disabled:cursor-not-allowed`}
+        >
+          {saving ? (
+            <LoaderCircle size={15} className="animate-spin" />
+          ) : saved ? (
+            <Check size={15} />
+          ) : (
+            <Bookmark size={15} />
+          )}
+
+          <span>{saved ? "Saved" : saving ? "Saving" : "Save"}</span>
+        </button>
       </div>
-    </Link>
+    </div>
   );
 }
 
@@ -187,23 +199,12 @@ function SkeletonGrid() {
 
 export default function Explore() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const user = useAuthStore((state) => state.user);
 
-  const [query, setQuery] = useState(
-    searchParams.get("q") || ""
-  );
-
-  const [genre, setGenre] = useState(
-    searchParams.get("genre") || ""
-  );
-
-  const [status, setStatus] = useState(
-    searchParams.get("status") || ""
-  );
-
-  const [sort, setSort] = useState(
-    searchParams.get("sort") || "popularity"
-  );
-
+  const [query, setQuery] = useState(searchParams.get("q") || "");
+  const [genre, setGenre] = useState(searchParams.get("genre") || "");
+  const [status, setStatus] = useState(searchParams.get("status") || "");
+  const [sort, setSort] = useState(searchParams.get("sort") || "popularity");
   const [page, setPage] = useState(
     Math.max(1, Number(searchParams.get("page")) || 1)
   );
@@ -213,6 +214,109 @@ export default function Explore() {
   const [error, setError] = useState("");
   const [hasNextPage, setHasNextPage] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
+
+  const [savedAnimeIds, setSavedAnimeIds] = useState([]);
+  const [savingAnimeId, setSavingAnimeId] = useState(null);
+  const [notice, setNotice] = useState(null);
+
+  const loadSavedAnime = useCallback(async () => {
+    if (!user?.id) {
+      setSavedAnimeIds([]);
+      return;
+    }
+
+    const { data, error: savedError } = await supabase
+      .from("saved_anime")
+      .select("anime_id")
+      .eq("user_id", user.id);
+
+    if (savedError) {
+      console.error("Failed to load saved anime:", savedError);
+      return;
+    }
+
+    setSavedAnimeIds((data || []).map((item) => String(item.anime_id)));
+  }, [user?.id]);
+
+  useEffect(() => {
+    loadSavedAnime();
+  }, [loadSavedAnime]);
+
+  const handleSaveAnime = async (item) => {
+    if (!user?.id) {
+      setNotice({
+        type: "error",
+        message: "Please sign in before saving anime to your vault.",
+      });
+      return;
+    }
+
+    const animeId = String(item.id);
+
+    if (savedAnimeIds.includes(animeId)) {
+      return;
+    }
+
+    setSavingAnimeId(animeId);
+    setNotice(null);
+
+    try {
+      const { data: existing, error: checkError } = await supabase
+        .from("saved_anime")
+        .select("id")
+        .eq("user_id", user.id)
+        .eq("anime_id", item.id)
+        .maybeSingle();
+
+      if (checkError) {
+        throw checkError;
+      }
+
+      if (existing) {
+        setSavedAnimeIds((current) =>
+          current.includes(animeId) ? current : [...current, animeId]
+        );
+
+        setNotice({
+          type: "success",
+          message: `${getTitle(item)} is already in your vault.`,
+        });
+
+        return;
+      }
+
+      const { error: insertError } = await supabase
+        .from("saved_anime")
+        .insert({
+          user_id: user.id,
+          anime_id: item.id,
+          anime_title: getTitle(item),
+          anime_image: getImage(item),
+          anime_status: item.status || null,
+          anime_episodes: item.episodes ?? null,
+        });
+
+      if (insertError) {
+        throw insertError;
+      }
+
+      setSavedAnimeIds((current) => [...current, animeId]);
+
+      setNotice({
+        type: "success",
+        message: `${getTitle(item)} added to My Vault!`,
+      });
+    } catch (err) {
+      console.error("Failed to save anime:", err);
+
+      setNotice({
+        type: "error",
+        message: err.message || "Could not save this anime. Please try again.",
+      });
+    } finally {
+      setSavingAnimeId(null);
+    }
+  };
 
   const loadAnime = useCallback(async () => {
     setLoading(true);
@@ -252,28 +356,22 @@ export default function Explore() {
       }
 
       if (status) {
-        filtered = filtered.filter(
-          (item) => item.status === status
-        );
+        filtered = filtered.filter((item) => item.status === status);
       }
 
       if (sort === "score") {
         filtered.sort(
-          (a, b) =>
-            (getScore(b) || 0) - (getScore(a) || 0)
+          (a, b) => (getScore(b) || 0) - (getScore(a) || 0)
         );
       } else if (sort === "newest") {
         filtered.sort(
           (a, b) => (getYear(b) || 0) - (getYear(a) || 0)
         );
       } else if (sort === "title") {
-        filtered.sort((a, b) =>
-          getTitle(a).localeCompare(getTitle(b))
-        );
+        filtered.sort((a, b) => getTitle(a).localeCompare(getTitle(b)));
       } else {
         filtered.sort(
-          (a, b) =>
-            (b.popularity || 0) - (a.popularity || 0)
+          (a, b) => (b.popularity || 0) - (a.popularity || 0)
         );
       }
 
@@ -296,7 +394,6 @@ export default function Explore() {
       setSearchParams(nextParams, { replace: true });
     } catch (err) {
       console.error("Failed to load anime:", err);
-
       setAnime([]);
       setHasNextPage(false);
 
@@ -306,14 +403,7 @@ export default function Explore() {
     } finally {
       setLoading(false);
     }
-  }, [
-    query,
-    genre,
-    status,
-    sort,
-    page,
-    setSearchParams,
-  ]);
+  }, [query, genre, status, sort, page, setSearchParams]);
 
   useEffect(() => {
     loadAnime();
@@ -339,10 +429,7 @@ export default function Explore() {
   };
 
   const hasFilters = Boolean(
-    query.trim() ||
-      genre ||
-      status ||
-      sort !== "popularity"
+    query.trim() || genre || status || sort !== "popularity"
   );
 
   const heading = query.trim()
@@ -371,25 +458,22 @@ export default function Explore() {
             </div>
 
             <h1 className="max-w-2xl text-3xl font-black tracking-tight sm:text-5xl">
-              Find your next
+              Find your
               <span className="block text-purple-400">
                 anime obsession.
               </span>
             </h1>
 
             <p className="mt-4 max-w-xl text-sm leading-6 text-gray-400 sm:text-base">
-              Explore anime, discover hidden gems, and find your
-              next favourite story.
+              Explore anime, discover hidden gems, and find your next
+              favourite story.
             </p>
 
             <form
               onSubmit={submitSearch}
               className="mt-7 flex max-w-2xl items-center gap-3 rounded-2xl border border-white/10 bg-black/30 p-2 pl-4 focus-within:border-purple-500/60"
             >
-              <Search
-                size={20}
-                className="shrink-0 text-gray-500"
-              />
+              <Search size={20} className="shrink-0 text-gray-500" />
 
               <input
                 type="search"
@@ -423,6 +507,27 @@ export default function Explore() {
           </div>
         </section>
 
+        {notice && (
+          <div
+            className={`mb-6 flex items-center justify-between gap-3 rounded-xl border p-4 text-sm ${
+              notice.type === "success"
+                ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-300"
+                : "border-red-500/20 bg-red-500/10 text-red-300"
+            }`}
+          >
+            <p>{notice.message}</p>
+
+            <button
+              type="button"
+              onClick={() => setNotice(null)}
+              className="shrink-0 rounded-lg p-1 hover:bg-white/10"
+              aria-label="Dismiss message"
+            >
+              <X size={17} />
+            </button>
+          </div>
+        )}
+
         <section className="mb-8">
           <div className="mb-3 flex items-center gap-2">
             <Flame size={19} className="text-orange-400" />
@@ -454,10 +559,7 @@ export default function Explore() {
           <div className="mb-5 flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
             <div>
               <div className="flex items-center gap-2">
-                <Sparkles
-                  size={20}
-                  className="text-purple-400"
-                />
+                <Sparkles size={20} className="text-purple-400" />
                 <h2 className="text-xl font-extrabold sm:text-2xl">
                   {heading}
                 </h2>
@@ -483,11 +585,7 @@ export default function Explore() {
               </button>
 
               <label className="flex items-center gap-2 rounded-xl border border-white/10 px-3 py-2.5 text-sm text-gray-300">
-                <ArrowUpDown
-                  size={16}
-                  className="text-gray-500"
-                />
-
+                <ArrowUpDown size={16} className="text-gray-500" />
                 <span className="hidden sm:inline">Sort:</span>
 
                 <select
@@ -526,10 +624,7 @@ export default function Explore() {
                   className="rounded-xl border border-white/10 bg-[#09090f] px-3 py-3 text-sm text-white outline-none focus:border-purple-500"
                 >
                   {genres.map((item) => (
-                    <option
-                      key={item.value || "all"}
-                      value={item.value}
-                    >
+                    <option key={item.value || "all"} value={item.value}>
                       {item.label}
                     </option>
                   ))}
@@ -548,10 +643,7 @@ export default function Explore() {
                   className="rounded-xl border border-white/10 bg-[#09090f] px-3 py-3 text-sm text-white outline-none focus:border-purple-500"
                 >
                   {statusOptions.map((option) => (
-                    <option
-                      key={option.value || "any"}
-                      value={option.value}
-                    >
+                    <option key={option.value || "any"} value={option.value}>
                       {option.label}
                     </option>
                   ))}
@@ -592,7 +684,13 @@ export default function Explore() {
             <>
               <div className="grid grid-cols-2 gap-x-3 gap-y-6 sm:grid-cols-3 sm:gap-x-4 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
                 {anime.map((item) => (
-                  <AnimeCard key={item.id} anime={item} />
+                  <AnimeCard
+                    key={item.id}
+                    anime={item}
+                    saved={savedAnimeIds.includes(String(item.id))}
+                    saving={savingAnimeId === String(item.id)}
+                    onSave={handleSaveAnime}
+                  />
                 ))}
               </div>
 
@@ -602,10 +700,7 @@ export default function Explore() {
                   disabled={page <= 1 || loading}
                   onClick={() => {
                     setPage((current) => Math.max(1, current - 1));
-                    window.scrollTo({
-                      top: 0,
-                      behavior: "smooth",
-                    });
+                    window.scrollTo({ top: 0, behavior: "smooth" });
                   }}
                   className="flex items-center gap-2 rounded-xl border border-white/10 px-4 py-3 text-sm font-semibold text-gray-300 transition hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-30"
                 >
@@ -622,10 +717,7 @@ export default function Explore() {
                   disabled={!hasNextPage || loading}
                   onClick={() => {
                     setPage((current) => current + 1);
-                    window.scrollTo({
-                      top: 0,
-                      behavior: "smooth",
-                    });
+                    window.scrollTo({ top: 0, behavior: "smooth" });
                   }}
                   className="flex items-center gap-2 rounded-xl border border-white/10 px-4 py-3 text-sm font-semibold text-gray-300 transition hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-30"
                 >
@@ -647,8 +739,7 @@ export default function Explore() {
               </h3>
 
               <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-gray-500">
-                Try another title or clear some filters to discover
-                more anime.
+                Try another title or clear some filters to discover more anime.
               </p>
 
               <button

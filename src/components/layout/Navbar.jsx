@@ -1,5 +1,5 @@
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, NavLink, useNavigate } from 'react-router-dom'
 import {
   Search,
@@ -14,6 +14,7 @@ import {
   ChevronDown,
   Compass,
   Home,
+  Clapperboard,
 } from 'lucide-react'
 import { useAuthStore } from '../../features/auth/authStore'
 
@@ -31,8 +32,15 @@ export default function Navbar() {
 
   const user = useAuthStore((state) => state.user)
   const profile = useAuthStore((state) => state.profile)
+  const fetchMyProfile = useAuthStore((state) => state.fetchMyProfile)
   const signOut = useAuthStore((state) => state.signOut)
   const isSubmitting = useAuthStore((state) => state.isSubmitting)
+
+  useEffect(() => {
+    if (user?.id && !profile) {
+      fetchMyProfile()
+    }
+  }, [user?.id, profile, fetchMyProfile])
 
   const displayName =
     profile?.displayName ||
@@ -52,6 +60,7 @@ export default function Navbar() {
 
   const initial = displayName.charAt(0).toUpperCase()
   const profilePath = user?.id ? `/profile/${user.id}` : '/profile'
+  const channelPath = user?.id ? `/channel/${user.id}` : '/channel'
 
   const closeMenus = () => {
     setMobileOpen(false)
@@ -60,6 +69,7 @@ export default function Navbar() {
 
   const handleSignOut = async () => {
     closeMenus()
+
     const result = await signOut()
 
     if (result !== false) {
@@ -69,6 +79,7 @@ export default function Navbar() {
 
   const profileItems = [
     { label: 'My Profile', path: profilePath, icon: UserRound },
+    { label: 'My Channel', path: channelPath, icon: Clapperboard },
     { label: 'My Vault', path: '/my-vault', icon: Library },
     { label: 'Subscriptions', path: '/subscriptions', icon: CreditCard },
     { label: 'Upload Video', path: '/upload', icon: Upload },
@@ -79,8 +90,11 @@ export default function Navbar() {
     avatarUrl ? (
       <img
         src={avatarUrl}
-        alt=""
-        className={`${size} shrink-0 rounded-full object-cover`}
+        alt={`${displayName}'s profile`}
+        className={`${size} shrink-0 rounded-full border border-white/10 object-cover`}
+        onError={(event) => {
+          event.currentTarget.style.display = 'none'
+        }}
       />
     ) : (
       <span
@@ -91,21 +105,24 @@ export default function Navbar() {
     )
 
   return (
-    <header className="sticky top-0 z-50 border-b border-white/10 bg-vault-bg/90 text-vault-text shadow-lg shadow-black/10 backdrop-blur-xl">
+    <header className="sticky top-0 z-[100] isolate border-b border-white/10 bg-vault-bg/95 text-vault-text shadow-lg shadow-black/10 backdrop-blur-xl">
       <div className="mx-auto flex h-16 max-w-7xl items-center gap-4 px-4 sm:px-6 lg:px-8">
-        <Link
-          to="/"
-          onClick={closeMenus}
-          className="flex shrink-0 items-center gap-2"
-          aria-label="Anime Vault home"
-        >
-          <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-vault-purple text-lg font-black text-white shadow-lg shadow-vault-purple/20">
-            A
-          </span>
-          <span className="text-lg font-black tracking-tight sm:text-xl">
-            Anime<span className="text-vault-accent">Vault</span>
-          </span>
-        </Link>
+<Link
+  to="/"
+  onClick={closeMenus}
+  className="relative z-[120] -ml-9 flex shrink-0 items-center gap-2"
+  aria-label="Anime Vault home"
+>
+  <img
+    src={`${import.meta.env.BASE_URL}anime-vault-logo.png`}
+    alt="Anime Vault"
+    className="h-20 w-20 shrink-0 object-contain"
+  />
+
+  <span className="text-lg font-black tracking-tight sm:text-xl">
+    Anime<span className="text-vault-accent">Vault</span>
+  </span>
+</Link>
 
         <nav
           className="ml-5 hidden items-center gap-1 md:flex"
@@ -159,6 +176,7 @@ export default function Navbar() {
                 className="flex items-center gap-2 rounded-full border border-white/10 bg-white/5 p-1.5 pr-2 transition hover:border-vault-purple/50 hover:bg-white/10"
               >
                 <Avatar />
+
                 <ChevronDown
                   size={15}
                   className={`text-vault-muted transition-transform ${
@@ -170,7 +188,7 @@ export default function Navbar() {
               {profileOpen && (
                 <div
                   role="menu"
-                  className="absolute right-0 top-full z-50 mt-2 w-64 overflow-hidden rounded-2xl border border-white/10 bg-vault-surface p-2 shadow-2xl shadow-black/40"
+                  className="absolute right-0 top-full z-[110] mt-2 w-64 overflow-hidden rounded-2xl border border-white/10 bg-vault-surface p-2 shadow-2xl shadow-black/40"
                 >
                   <Link
                     to={profilePath}
@@ -179,10 +197,12 @@ export default function Navbar() {
                     className="flex items-center gap-3 rounded-xl px-3 py-3 transition hover:bg-white/5"
                   >
                     <Avatar size="h-10 w-10" />
+
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-sm font-bold text-white">
                         {displayName}
                       </span>
+
                       <span className="block truncate text-xs text-vault-muted">
                         View your profile
                       </span>
@@ -227,6 +247,7 @@ export default function Navbar() {
               >
                 Sign In
               </Link>
+
               <Link
                 to="/signup"
                 className="rounded-xl bg-vault-purple px-4 py-2 text-sm font-bold text-white transition hover:bg-vault-purple/80"
@@ -252,7 +273,7 @@ export default function Navbar() {
       </div>
 
       {mobileOpen && (
-        <div className="border-t border-white/10 bg-vault-bg px-4 py-4 sm:hidden">
+        <div className="relative z-[110] border-t border-white/10 bg-vault-bg px-4 py-4 sm:hidden">
           <nav className="flex flex-col gap-1" aria-label="Mobile navigation">
             {navLinks.map(({ name, path, icon: Icon }) => (
               <NavLink
@@ -283,10 +304,12 @@ export default function Navbar() {
                 className="flex items-center gap-3 rounded-xl p-3 transition hover:bg-white/5"
               >
                 <Avatar size="h-11 w-11" />
+
                 <span className="min-w-0">
                   <span className="block truncate font-bold text-white">
                     {displayName}
                   </span>
+
                   <span className="block text-xs text-vault-muted">
                     View your profile
                   </span>
@@ -326,6 +349,7 @@ export default function Navbar() {
               >
                 Sign In
               </Link>
+
               <Link
                 to="/signup"
                 onClick={closeMenus}

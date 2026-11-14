@@ -1,25 +1,53 @@
+
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Clapperboard, LoaderCircle, RefreshCw } from 'lucide-react'
+import {
+  Clapperboard,
+  LoaderCircle,
+  RefreshCw,
+  Upload,
+  X,
+  Sparkles,
+} from 'lucide-react'
 
 import { useAuthStore } from '../features/auth/authStore'
 import { useShortStore } from '../features/shorts/shortsStore'
+import shortService from '../features/shorts/services/shortsService'
+
 import ShortCard from '../components/shorts/ShortCard'
 import CommentSection from '../components/comments/CommentSection'
 
 const PAGE_SIZE = 20
-
 const SEEN_SHORTS_KEY = 'anime-vault-seen-shorts-v1'
 
 function readSeenShortIds() {
   try {
-    const parsed = JSON.parse(
+    const saved = JSON.parse(
       window.localStorage.getItem(SEEN_SHORTS_KEY) || '[]',
     )
-    return new Set(Array.isArray(parsed) ? parsed.map(String) : [])
+
+    return new Set(Array.isArray(saved) ? saved.map(String) : [])
   } catch {
     return new Set()
   }
+}
+
+function saveSeenShortIds(ids) {
+  try {
+    window.localStorage.setItem(
+      SEEN_SHORTS_KEY,
+      JSON.stringify([...ids].slice(-1000)),
+    )
+  } catch {
+  }
+}
+
+function rememberSeenShort(id) {
+  if (!id) return
+
+  const seen = readSeenShortIds()
+  seen.add(String(id))
+  saveSeenShortIds(seen)
 }
 
 function shuffle(items) {
@@ -34,46 +62,28 @@ function shuffle(items) {
 }
 
 function shuffleForThisVisit(items) {
+  if (!items.length) return []
+
   const seen = readSeenShortIds()
 
-  const unseenItems = items.filter(
-    (item) => !seen.has(String(item?.id)),
+  const unseen = items.filter(
+    (item) => !seen.has(String(item.id)),
   )
 
-  const seenItems = items.filter(
-    (item) => seen.has(String(item?.id)),
+  const watched = items.filter(
+    (item) => seen.has(String(item.id)),
   )
 
-  // Show Shorts not watched in previous visits first.
-  // If everything has been seen, start a new shuffled cycle.
-  if (unseenItems.length === 0 && items.length > 0) {
+  if (!unseen.length) {
     try {
       window.localStorage.removeItem(SEEN_SHORTS_KEY)
     } catch {
-      // Storage may be blocked.
     }
 
     return shuffle(items)
   }
 
-  return [...shuffle(unseenItems), ...shuffle(seenItems)]
-}
-
-function rememberSeenShort(shortId) {
-  if (!shortId) return
-
-  try {
-    const seen = readSeenShortIds()
-    seen.add(String(shortId))
-
-    // Keep the saved history bounded.
-    window.localStorage.setItem(
-      SEEN_SHORTS_KEY,
-      JSON.stringify([...seen].slice(-1000)),
-    )
-  } catch {
-    // Storage may be blocked.
-  }
+  return [...shuffle(unseen), ...shuffle(watched)]
 }
 
 export default function Shorts() {
@@ -93,54 +103,102 @@ export default function Shorts() {
 
   const [activeIndex, setActiveIndex] = useState(0)
   const [commentsShortId, setCommentsShortId] = useState(null)
-  const [muted, setMuted] = useState(true)
+  const [muted, setMuted] = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)
   const [hasMore, setHasMore] = useState(true)
   const [actionError, setActionError] = useState('')
   const [busyLikeIds, setBusyLikeIds] = useState([])
-  const [copiedShortId, setCopiedShortId] = useState(null)
+  const [savedShortIds, setSavedShortIds] = useState([])
+  const [busySaveIds, setBusySaveIds] = useState([])
 
-  const feedRef = useRef(null)
   const cardRefs = useRef(new Map())
   const viewRecordedRef = useRef(new Set())
-  const observerRef = useRef(null)
   const touchStartYRef = useRef(null)
   const activeIndexRef = useRef(0)
+
+  const activeShort = shorts[activeIndex]
 
   useEffect(() => {
     activeIndexRef.current = activeIndex
   }, [activeIndex])
 
-  // --------------------------------------------------
-  // LOAD SHORTS
-  // --------------------------------------------------
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadSavedShorts() {
+      if (!user?.id) {
+        setSavedShortIds([])
+        return
+      }
+
+      try {
+        const result = await shortService.getSavedShorts()
+
+        if (cancelled) return
+
+        if (!result?.success) {
+          console.error(
+            'Unable to load saved Shorts:',
+            result?.error,
+          )
+          return
+        }
+
+        const savedItems = result.shorts || []
+
+        setSavedShortIds(
+          savedItems
+            .map((item) => item.short_id || item.id)
+            .filter(Boolean)
+            .map(String),
+        )
+      } catch (err) {
+        if (!cancelled) {
+          console.error('Unable to load saved Shorts:', err)
+        }
+      }
+    }
+
+    loadSavedShorts()
+
+    return () => {
+      cancelled = true
+    }
+  }, [user?.id])
 
   useEffect(() => {
     let cancelled = false
 
     async function loadInitialShorts() {
-      const result = await fetchShorts({
-        limit: PAGE_SIZE,
-        offset: 0,
-        append: false,
-      })
+      try {
+        setActionError('')
 
-      if (cancelled) return
+        const result = await fetchShorts({
+          limit: PAGE_SIZE,
+          offset: 0,
+          append: false,
+        })
 
-      setHasMore((result?.shorts?.length || 0) >= PAGE_SIZE)
+        if (cancelled) return
 
-      if (
-        result?.success &&
-        Array.isArray(result.shorts) &&
-        result.shorts.length
-      ) {
-        const shuffled = shuffleForThisVisit(result.shorts)
+        const received = result?.shorts || []
 
-        // Keep the Zustand feed order aligned with the displayed order.
-        useShortStore.setState({ shorts: shuffled })
+        setHasMore(received.length >= PAGE_SIZE)
+
+        if (result?.success && received.length) {
+          useShortStore.setState({
+            shorts: shuffleForThisVisit(received),
+          })
+        }
+
+        setActiveIndex(0)
+      } catch (err) {
+        if (!cancelled) {
+          setActionError(
+            err?.message || 'Unable to load Anime Shorts.',
+          )
+        }
       }
-
-      setActiveIndex(0)
     }
 
     loadInitialShorts()
@@ -150,33 +208,112 @@ export default function Shorts() {
     }
   }, [fetchShorts])
 
-  // --------------------------------------------------
-  // CHECK LIKE STATUS
-  // --------------------------------------------------
-
   useEffect(() => {
     if (!user?.id || !shorts.length) return
 
     shorts.forEach((short) => {
-      if (short?.id) {
-        checkLiked(short.id)
-      }
+      if (short?.id) checkLiked(short.id)
     })
   }, [user?.id, shorts, checkLiked])
 
-  // --------------------------------------------------
-  // INTERSECTION OBSERVER
-  // Determines which Short is currently active.
-  // --------------------------------------------------
+  const loadMoreShorts = useCallback(async () => {
+    if (loadingMore || !hasMore) return
+
+    setLoadingMore(true)
+    setActionError('')
+
+    try {
+      const result = await fetchShorts({
+        limit: PAGE_SIZE,
+        offset: shorts.length,
+        append: true,
+      })
+
+      const received = result?.shorts || []
+
+      setHasMore(received.length >= PAGE_SIZE)
+
+      if (result?.success && received.length) {
+        const currentIds = new Set(
+          useShortStore.getState().shorts.map((item) => String(item.id)),
+        )
+
+        const newShorts = received.filter(
+          (item) => !currentIds.has(String(item.id)),
+        )
+
+        if (newShorts.length) {
+          useShortStore.setState((state) => ({
+            shorts: [
+              ...state.shorts,
+              ...shuffleForThisVisit(newShorts),
+            ],
+          }))
+        }
+      }
+
+      if (!result?.success) {
+        setActionError(
+          result?.error || 'Unable to load more Shorts.',
+        )
+      }
+    } catch (err) {
+      setActionError(
+        err?.message || 'Unable to load more Shorts.',
+      )
+    } finally {
+      setLoadingMore(false)
+    }
+  }, [loadingMore, hasMore, fetchShorts, shorts.length])
+
+  const goToShort = useCallback((index) => {
+    const currentShorts = useShortStore.getState().shorts
+
+    if (!currentShorts.length) return
+
+    const safeIndex = Math.max(
+      0,
+      Math.min(index, currentShorts.length - 1),
+    )
+
+    setActiveIndex(safeIndex)
+
+    const element = cardRefs.current.get(safeIndex)
+
+    if (element) {
+      element.scrollIntoView({
+        behavior: 'smooth',
+        block: 'start',
+      })
+    }
+  }, [])
+
+  const goNext = useCallback(() => {
+    const currentShorts = useShortStore.getState().shorts
+    const nextIndex = activeIndexRef.current + 1
+
+    if (nextIndex < currentShorts.length) {
+      goToShort(nextIndex)
+      return
+    }
+
+    if (hasMore && !loadingMore) {
+      loadMoreShorts()
+    }
+  }, [goToShort, hasMore, loadingMore, loadMoreShorts])
+
+  const goPrevious = useCallback(() => {
+    const previousIndex = activeIndexRef.current - 1
+
+    if (previousIndex >= 0) {
+      goToShort(previousIndex)
+    }
+  }, [goToShort])
 
   useEffect(() => {
-    const root = feedRef.current
+    if (!shorts.length) return
 
-    if (!root || !shorts.length) return
-
-    observerRef.current?.disconnect()
-
-    observerRef.current = new IntersectionObserver(
+    const observer = new IntersectionObserver(
       (entries) => {
         let bestEntry = null
 
@@ -193,7 +330,9 @@ export default function Shorts() {
 
         if (!bestEntry) return
 
-        const index = Number(bestEntry.target.dataset.shortIndex)
+        const index = Number(
+          bestEntry.target.dataset.shortIndex,
+        )
 
         if (
           Number.isInteger(index) &&
@@ -203,235 +342,137 @@ export default function Shorts() {
         }
       },
       {
-        root,
-        threshold: [0.35, 0.55, 0.7, 0.85],
+        root: null,
+        rootMargin: '-20% 0px -20% 0px',
+        threshold: [0.2, 0.4, 0.6, 0.8],
       },
     )
 
     cardRefs.current.forEach((element) => {
-      if (element) observerRef.current.observe(element)
+      if (element) observer.observe(element)
     })
 
-    return () => {
-      observerRef.current?.disconnect()
-    }
+    return () => observer.disconnect()
   }, [shorts.length])
 
-  // --------------------------------------------------
-  // RECORD A VIEW ONCE PER SHORT PER PAGE SESSION
-  // --------------------------------------------------
-
   useEffect(() => {
-    const short = shorts[activeIndex]
+    if (!activeShort?.id) return
 
-    if (!short?.id || viewRecordedRef.current.has(short.id)) {
+    if (viewRecordedRef.current.has(activeShort.id)) return
+
+    viewRecordedRef.current.add(activeShort.id)
+    rememberSeenShort(activeShort.id)
+
+    recordView(activeShort.id)
+  }, [activeShort?.id, recordView])
+
+  const handleLike = useCallback(async (shortId) => {
+    if (!shortId) return
+
+    if (!user?.id) {
+      setActionError('Please sign in to like a Short.')
       return
     }
 
-    viewRecordedRef.current.add(short.id)
-    rememberSeenShort(short.id)
-    recordView(short.id)
-  }, [activeIndex, shorts, recordView])
+    if (busyLikeIds.includes(shortId)) return
 
-  // --------------------------------------------------
-  // NAVIGATION
-  // --------------------------------------------------
-
-  const goToShort = useCallback(
-    (index) => {
-      if (!shorts.length) return
-
-      const safeIndex = Math.max(
-        0,
-        Math.min(index, shorts.length - 1),
-      )
-
-      setActiveIndex(safeIndex)
-
-      const element = cardRefs.current.get(safeIndex)
-
-      element?.scrollIntoView({
-        behavior: 'smooth',
-        block: 'start',
-      })
-    },
-    [shorts.length],
-  )
-
-  const goNext = useCallback(() => {
-    if (activeIndex < shorts.length - 1) {
-      goToShort(activeIndex + 1)
-      return
-    }
-
-    if (hasMore && !loadingMore) {
-      loadMoreShorts()
-    }
-  }, [
-    activeIndex,
-    shorts.length,
-    goToShort,
-    hasMore,
-    loadingMore,
-  ])
-
-  const goPrevious = useCallback(() => {
-    if (activeIndex > 0) {
-      goToShort(activeIndex - 1)
-    }
-  }, [activeIndex, goToShort])
-
-  // --------------------------------------------------
-  // LOAD MORE SHORTS
-  // --------------------------------------------------
-
-  const loadMoreShorts = useCallback(async () => {
-    if (loadingMore || !hasMore) return
-
-    setLoadingMore(true)
+    setBusyLikeIds((previous) => [...previous, shortId])
     setActionError('')
 
     try {
-      const result = await fetchShorts({
-        limit: PAGE_SIZE,
-        offset: shorts.length,
-        append: true,
-      })
+      const alreadyLiked = likedShortIds.includes(shortId)
 
-      const received = result?.shorts?.length || 0
+      const result = alreadyLiked
+        ? await unlikeShort(shortId)
+        : await likeShort(shortId)
 
-      setHasMore(received >= PAGE_SIZE)
-
-      if (!result?.success && result?.error) {
-        setActionError(result.error)
+      if (!result?.success) {
+        setActionError(
+          result?.error || 'Unable to update your like.',
+        )
       }
     } catch (err) {
       setActionError(
-        err?.message || 'Unable to load more Shorts.',
+        err?.message || 'Unable to update your like.',
       )
     } finally {
-      setLoadingMore(false)
+      setBusyLikeIds((previous) =>
+        previous.filter((id) => id !== shortId),
+      )
     }
   }, [
-    loadingMore,
-    hasMore,
-    fetchShorts,
-    shorts.length,
+    user?.id,
+    busyLikeIds,
+    likedShortIds,
+    likeShort,
+    unlikeShort,
   ])
 
-  // --------------------------------------------------
-  // LIKE / UNLIKE
-  // --------------------------------------------------
+  const handleSave = useCallback(async (shortId) => {
+    if (!shortId) return
 
-  const handleLike = useCallback(
-    async (shortId) => {
-      if (!shortId) return
+    if (!user?.id) {
+      setActionError('Please sign in to save Shorts to My Vault.')
+      return
+    }
 
-      if (!user?.id) {
-        setActionError('Please sign in to like a Short.')
+    if (savedShortIds.includes(String(shortId))) {
+      setActionError('This Short is already saved in your My Vault.')
+      return
+    }
+
+    if (busySaveIds.includes(shortId)) return
+
+    setBusySaveIds((previous) => [...previous, shortId])
+    setActionError('')
+
+    try {
+      const result = await shortService.saveShort(shortId)
+
+      if (!result?.success) {
+        setActionError(
+          result?.error || 'Unable to save this Short.',
+        )
         return
       }
 
-      if (busyLikeIds.includes(shortId)) return
+      setSavedShortIds((previous) => [
+        ...previous,
+        String(shortId),
+      ])
 
-      setBusyLikeIds((previous) => [...previous, shortId])
-      setActionError('')
+      setActionError(
+        result?.message || 'Short saved to My Vault.',
+      )
+    } catch (err) {
+      setActionError(
+        err?.message || 'Unable to save this Short.',
+      )
+    } finally {
+      setBusySaveIds((previous) =>
+        previous.filter((id) => id !== shortId),
+      )
+    }
+  }, [user?.id, savedShortIds, busySaveIds])
 
-      try {
-        const alreadyLiked = likedShortIds.includes(shortId)
+  const openComments = useCallback(async (shortId) => {
+    if (!shortId) return
 
-        const result = alreadyLiked
-          ? await unlikeShort(shortId)
-          : await likeShort(shortId)
+    setCommentsShortId(shortId)
+    setActionError('')
 
-        if (!result?.success) {
-          setActionError(
-            result?.error || 'Unable to update your like.',
-          )
-        }
-      } catch (err) {
-        setActionError(
-          err?.message || 'Unable to update your like.',
-        )
-      } finally {
-        setBusyLikeIds((previous) =>
-          previous.filter((id) => id !== shortId),
-        )
-      }
-    },
-    [
-      user?.id,
-      busyLikeIds,
-      likedShortIds,
-      likeShort,
-      unlikeShort,
-    ],
-  )
-
-  // --------------------------------------------------
-  // COMMENTS
-  // --------------------------------------------------
-
-  const openComments = useCallback(
-    async (shortId) => {
-      if (!shortId) return
-
-      setCommentsShortId(shortId)
-      setActionError('')
-
-      try {
-        await fetchComments(shortId)
-      } catch (err) {
-        setActionError(
-          err?.message || 'Unable to load comments.',
-        )
-      }
-    },
-    [fetchComments],
-  )
+    try {
+      await fetchComments(shortId)
+    } catch (err) {
+      setActionError(
+        err?.message || 'Unable to load comments.',
+      )
+    }
+  }, [fetchComments])
 
   const closeComments = useCallback(() => {
     setCommentsShortId(null)
   }, [])
-
-  // --------------------------------------------------
-  // SHARE
-  // --------------------------------------------------
-
-  const handleShare = useCallback(async (short) => {
-    if (!short?.id) return
-
-    const shareUrl = `${window.location.origin}/shorts/${short.id}`
-    const shareTitle = short.title || 'Anime Vault Short'
-
-    try {
-      if (navigator.share) {
-        await navigator.share({
-          title: shareTitle,
-          url: shareUrl,
-        })
-      } else if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(shareUrl)
-        setCopiedShortId(short.id)
-
-        window.setTimeout(() => {
-          setCopiedShortId((current) =>
-            current === short.id ? null : current,
-          )
-        }, 1800)
-      } else {
-        window.prompt('Copy this Short link:', shareUrl)
-      }
-    } catch (err) {
-      if (err?.name !== 'AbortError') {
-        setActionError('Unable to share this Short.')
-      }
-    }
-  }, [])
-
-  // --------------------------------------------------
-  // KEYBOARD NAVIGATION
-  // --------------------------------------------------
 
   useEffect(() => {
     function handleKeyDown(event) {
@@ -439,8 +480,10 @@ export default function Shorts() {
 
       if (
         target instanceof HTMLElement &&
-        (target.isContentEditable ||
-          ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))
+        (
+          target.isContentEditable ||
+          ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)
+        )
       ) {
         return
       }
@@ -467,12 +510,9 @@ export default function Shorts() {
     }
   }, [goNext, goPrevious, closeComments])
 
-  // --------------------------------------------------
-  // TOUCH NAVIGATION
-  // --------------------------------------------------
-
   function handleTouchStart(event) {
-    touchStartYRef.current = event.touches[0]?.clientY ?? null
+    touchStartYRef.current =
+      event.touches[0]?.clientY ?? null
   }
 
   function handleTouchEnd(event) {
@@ -485,7 +525,7 @@ export default function Shorts() {
 
     const distance = startY - endY
 
-    if (Math.abs(distance) < 70) return
+    if (Math.abs(distance) < 65) return
 
     if (distance > 0) {
       goNext()
@@ -494,222 +534,237 @@ export default function Shorts() {
     }
   }
 
-  // --------------------------------------------------
-  // EMPTY / LOADING STATES
-  // --------------------------------------------------
-
-  if (isLoading && shorts.length === 0) {
-    return (
-      <main className="shorts-page">
-        <div className="shorts-state">
-          <LoaderCircle className="shorts-spinner" size={34} />
-          <h2>Loading Anime Shorts</h2>
-          <p>Getting your anime moments ready...</p>
-        </div>
-
-        <style>{styles}</style>
-      </main>
-    )
-  }
-
-  if (error && shorts.length === 0) {
-    return (
-      <main className="shorts-page">
-        <header className="shorts-header">
-          <Link to="/" className="shorts-brand">
-            <Clapperboard size={23} />
-            <span>Anime Vault</span>
-          </Link>
-        </header>
-
-        <div className="shorts-state">
-          <h2>Could not load Shorts</h2>
-          <p>{error}</p>
-
-          <button
-            type="button"
-            className="shorts-primary-button"
-            onClick={() =>
-              fetchShorts({
-                limit: PAGE_SIZE,
-                offset: 0,
-                append: false,
-              })
-            }
-          >
-            <RefreshCw size={17} />
-            Try again
-          </button>
-        </div>
-
-        <style>{styles}</style>
-      </main>
-    )
-  }
-
-  if (!shorts.length) {
-    return (
-      <main className="shorts-page">
-        <header className="shorts-header">
-          <Link to="/" className="shorts-brand">
-            <Clapperboard size={23} />
-            <span>Anime Vault</span>
-          </Link>
-        </header>
-
-        <div className="shorts-state">
-          <Clapperboard size={42} />
-          <h2>No Shorts yet</h2>
-          <p>Be the first to share an anime moment.</p>
-
-          <Link
-            to="/shorts/create"
-            className="shorts-primary-button"
-          >
-            Create a Short
-          </Link>
-        </div>
-
-        <style>{styles}</style>
-      </main>
-    )
-  }
+  const isInitialLoading = isLoading && shorts.length === 0
 
   return (
     <main className="shorts-page">
-      {/* HEADER */}
       <header className="shorts-header">
         <Link to="/" className="shorts-brand">
-          <Clapperboard size={23} />
+          <span className="shorts-brand-icon">
+            <Clapperboard size={22} />
+          </span>
+
           <span>Anime Vault</span>
         </Link>
 
-        <div className="shorts-header-actions">
-          <span className="shorts-header-label">
-            Anime Shorts
-          </span>
-
-          <Link
-            to="/shorts/create"
-            className="shorts-create-button"
-          >
-            + Create
-          </Link>
-        </div>
+        <Link
+          to="/upload"
+          className="shorts-create-button"
+        >
+          <Upload size={16} />
+          Create
+        </Link>
       </header>
 
-      {/* FEED */}
-      <section className="shorts-layout">
-        <div
-          className="shorts-feed"
-          ref={feedRef}
-          onTouchStart={handleTouchStart}
-          onTouchEnd={handleTouchEnd}
-        >
-          {shorts.map((short, index) => {
-            const shortId = short.id
-            const isLiked = likedShortIds.includes(shortId)
-            const isBusy = busyLikeIds.includes(shortId)
-            const isActive = index === activeIndex
-            const isCommentOpen = commentsShortId === shortId
+      <section className="shorts-feed-section">
+        {isInitialLoading ? (
+          <div className="shorts-state">
+            <LoaderCircle
+              className="shorts-spinner"
+              size={38}
+            />
 
-            return (
-              <article
-                key={shortId}
-                ref={(element) => {
-                  if (element) {
-                    cardRefs.current.set(index, element)
-                  } else {
-                    cardRefs.current.delete(index)
-                  }
-                }}
-                data-short-index={index}
-                className={`shorts-feed-item ${
-                  isActive ? 'is-active' : ''
-                }`}
-              >
-                <div className="shorts-video-column">
-                  <ShortCard
-                    short={short}
-                    isActive={isActive}
-                    isLiked={isLiked}
-                    muted={muted}
-                    commentsOpen={isCommentOpen}
-                    onLike={() => handleLike(shortId)}
-                    onUnlike={() => handleLike(shortId)}
-                    onComments={() => openComments(shortId)}
-                    onNext={goNext}
-                    onPrevious={goPrevious}
-                    onView={() => {
-                      if (
-                        shortId &&
-                        !viewRecordedRef.current.has(shortId)
-                      ) {
-                        viewRecordedRef.current.add(shortId)
-                        rememberSeenShort(shortId)
-                        recordView(shortId)
+            <h2>Loading Anime Shorts</h2>
+
+            <p>Finding something good to watch...</p>
+          </div>
+        ) : (error || actionError) && shorts.length === 0 ? (
+          <div className="shorts-state">
+            <Clapperboard size={38} />
+
+            <h2>Could not load Shorts</h2>
+
+            <p>{actionError || error}</p>
+
+            <button
+              type="button"
+              className="shorts-primary-button"
+              onClick={() =>
+                fetchShorts({
+                  limit: PAGE_SIZE,
+                  offset: 0,
+                  append: false,
+                })
+              }
+            >
+              <RefreshCw size={17} />
+              Try again
+            </button>
+          </div>
+        ) : shorts.length === 0 ? (
+          <div className="shorts-state">
+            <Clapperboard size={42} />
+
+            <h2>No published Shorts yet</h2>
+
+            <p>
+              Be the first to share an anime moment with the community.
+            </p>
+
+            <Link
+              to="/upload"
+              className="shorts-primary-button"
+            >
+              <Upload size={17} />
+              Create a Short
+            </Link>
+          </div>
+        ) : (
+          <div className="shorts-layout">
+            <div
+              className="shorts-feed"
+              onTouchStart={handleTouchStart}
+              onTouchEnd={handleTouchEnd}
+            >
+              {shorts.map((short, index) => {
+                const shortId = short.id
+                const isLiked = likedShortIds.includes(shortId)
+                const isBusy = busyLikeIds.includes(shortId)
+                const isSaved = savedShortIds.includes(String(shortId))
+                const isSaving = busySaveIds.includes(shortId)
+                const isActive = index === activeIndex
+                const isCommentOpen =
+                  commentsShortId === shortId
+
+                return (
+                  <article
+                    key={shortId}
+                    ref={(element) => {
+                      if (element) {
+                        cardRefs.current.set(index, element)
+                      } else {
+                        cardRefs.current.delete(index)
                       }
                     }}
-                    onToggleMute={() =>
-                      setMuted((previous) => !previous)
-                    }
-                  />
-                </div>
-
-                {/* COMMENTS */}
-                {isCommentOpen && (
-                  <div className="shorts-comments-panel">
-                    <div className="shorts-comments-header">
-                      <h3>Comments</h3>
-
-                      <button
-                        type="button"
-                        onClick={closeComments}
-                        aria-label="Close comments"
-                      >
-                        ✕
-                      </button>
+                    data-short-index={index}
+                    className={`shorts-feed-item ${
+                      isActive ? 'is-active' : ''
+                    } ${
+                      isCommentOpen ? 'has-comments' : ''
+                    }`}
+                  >
+                    <div className="shorts-video-column">
+                      <div className="shorts-video-card">
+                        <ShortCard
+                          short={short}
+                          isActive={isActive}
+                          isLiked={isLiked}
+                          isBusy={isBusy}
+                          isSaved={isSaved}
+                          isSaving={isSaving}
+                          muted={muted}
+                          commentsOpen={isCommentOpen}
+                          canGoPrevious={index > 0}
+                          onLike={() => handleLike(shortId)}
+                          onUnlike={() => handleLike(shortId)}
+                          onSave={() => handleSave(shortId)}
+                          onComments={() => openComments(shortId)}
+                          onNext={goNext}
+                          onPrevious={goPrevious}
+                          onView={() => {
+                            if (!viewRecordedRef.current.has(shortId)) {
+                              viewRecordedRef.current.add(shortId)
+                              rememberSeenShort(shortId)
+                              recordView(shortId)
+                            }
+                          }}
+                          onToggleMute={() =>
+                            setMuted((previous) => !previous)
+                          }
+                        />
+                      </div>
                     </div>
 
-                    <CommentSection
-                      shortId={shortId}
-                      short={short}
-                    />
-                  </div>
-                )}
-              </article>
-            )
-          })}
+                    {isCommentOpen && (
+                      <div className="shorts-comments-panel">
+                        <div className="shorts-comments-header">
+                          <div>
+                            <span className="shorts-eyebrow">
+                              COMMUNITY
+                            </span>
 
-          {/* LOAD MORE */}
-          {loadingMore && (
-            <div className="shorts-load-more">
-              <LoaderCircle className="shorts-spinner" size={25} />
-              <span>Loading more Shorts...</span>
-            </div>
-          )}
+                            <h3>Comments</h3>
+                          </div>
 
-          {!hasMore && shorts.length > 0 && (
-            <div className="shorts-end-message">
-              <Clapperboard size={22} />
-              <p>You've reached the end of the Shorts feed.</p>
+                          <button
+                            type="button"
+                            onClick={closeComments}
+                            aria-label="Close comments"
+                          >
+                            <X size={19} />
+                          </button>
+                        </div>
+
+                        <CommentSection
+                          shortId={shortId}
+                          short={short}
+                        />
+                      </div>
+                    )}
+                  </article>
+                )
+              })}
+
+              {loadingMore && (
+                <div className="shorts-load-more">
+                  <LoaderCircle
+                    className="shorts-spinner"
+                    size={25}
+                  />
+
+                  <span>Finding more Shorts...</span>
+                </div>
+              )}
+
+              {!hasMore && shorts.length > 0 && (
+                <div className="shorts-end-message">
+                  <Sparkles size={24} />
+
+                  <h3>You're all caught up!</h3>
+
+                  <p>
+                    You've reached the end of the current Shorts feed.
+                  </p>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const freshOrder = shuffleForThisVisit(shorts)
+
+                      useShortStore.setState({
+                        shorts: freshOrder,
+                      })
+
+                      setActiveIndex(0)
+
+                      requestAnimationFrame(() => {
+                        cardRefs.current.get(0)?.scrollIntoView({
+                          behavior: 'smooth',
+                          block: 'start',
+                        })
+                      })
+                    }}
+                  >
+                    <RefreshCw size={16} />
+                    Shuffle again
+                  </button>
+                </div>
+              )}
             </div>
-          )}
-        </div>
+          </div>
+        )}
       </section>
 
-      {(actionError || (error && shorts.length > 0)) && (
+      {actionError && (
         <div className="shorts-toast" role="status">
-          <span>{actionError || error}</span>
+          <span>{actionError}</span>
 
           <button
             type="button"
-            onClick={() => {
-              setActionError('')
-            }}
+            onClick={() => setActionError('')}
             aria-label="Dismiss message"
           >
-            ✕
+            <X size={17} />
           </button>
         </div>
       )}
@@ -721,16 +776,18 @@ export default function Shorts() {
 
 const styles = `
 .shorts-page {
-  --shorts-accent: #a855f7;
-  --shorts-accent-light: #c084fc;
-  --shorts-bg: #09090f;
-  --shorts-panel: #14141d;
-  --shorts-text: #f5f3ff;
-  --shorts-muted: #a1a1b5;
+  --accent: #a855f7;
+  --accent-light: #c084fc;
+  --background: #08080e;
+  --panel: #14141d;
+  --text: #f5f3ff;
+  --muted: #a1a1b5;
 
   min-height: 100vh;
-  background: var(--shorts-bg);
-  color: var(--shorts-text);
+  background:
+    radial-gradient(ellipse at 50% -15%, rgba(168,85,247,.12), transparent 45%),
+    var(--background);
+  color: var(--text);
   font-family: inherit;
 }
 
@@ -741,159 +798,252 @@ const styles = `
 }
 
 .shorts-header {
-  position: sticky;
+  position: fixed;
   top: 0;
-  z-index: 50;
+  left: 0;
+  right: 0;
+  z-index: 100;
   min-height: 68px;
   padding: 12px clamp(16px, 4vw, 48px);
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  background: rgba(9, 9, 15, 0.92);
-  border-bottom: 1px solid rgba(255,255,255,0.08);
-  backdrop-filter: blur(18px);
+  background: rgba(8,8,14,.91);
+  border-bottom: 1px solid rgba(255,255,255,.07);
+  backdrop-filter: blur(20px);
 }
 
 .shorts-brand {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
+  gap: 11px;
   color: white;
   font-size: 18px;
-  font-weight: 800;
+  font-weight: 850;
   text-decoration: none;
-  white-space: nowrap;
 }
 
-.shorts-brand svg {
-  color: var(--shorts-accent-light);
-}
-
-.shorts-header-actions {
-  display: flex;
-  align-items: center;
-  gap: 18px;
-}
-
-.shorts-header-label {
-  color: var(--shorts-muted);
-  font-size: 13px;
-  font-weight: 700;
+.shorts-brand-icon {
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  background: rgba(168,85,247,.15);
+  color: var(--accent-light);
 }
 
 .shorts-create-button,
 .shorts-primary-button {
-  min-height: 40px;
+  min-height: 41px;
   padding: 10px 16px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
   border: 0;
-  border-radius: 12px;
-  background: var(--shorts-accent);
+  border-radius: 11px;
+  background: var(--accent);
   color: white;
   font: inherit;
   font-size: 13px;
-  font-weight: 750;
+  font-weight: 800;
   text-decoration: none;
   cursor: pointer;
-  transition: background .2s, transform .2s;
+  transition: .2s ease;
 }
 
 .shorts-create-button:hover,
 .shorts-primary-button:hover {
   background: #9333ea;
-  transform: translateY(-1px);
+  transform: translateY(-2px);
+}
+
+.shorts-feed-section {
+  width: min(100% - 40px, 1200px);
+  margin: 0 auto;
+  padding-top: 100px;
 }
 
 .shorts-layout {
-  position: relative;
   width: 100%;
-  min-height: calc(100vh - 68px);
   display: flex;
   justify-content: center;
-  align-items: flex-start;
-  gap: 24px;
-  padding: 22px 24px 40px;
+  padding: 0 12px 50px;
 }
 
 .shorts-feed {
-  width: min(100%, 540px);
-  min-width: 0;
+  width: min(100%, 1120px);
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 48px;
-  overflow: visible;
 }
 
 .shorts-feed-item {
   width: 100%;
-  max-width: 540px;
+  max-width: 850px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: center;
+  gap: 22px;
   scroll-margin-top: 88px;
+  transition: max-width 0.35s ease;
+}
+
+.shorts-feed-item.has-comments {
+  max-width: 1120px;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 390px);
 }
 
 .shorts-video-column {
+  width: 100%;
+  min-width: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 14px;
+}
+
+.shorts-video-card {
   width: 100%;
+  min-width: 0;
+  display: flex;
+  justify-content: center;
+  transition: transform 0.35s ease;
+}
+
+.shorts-feed-item.has-comments .shorts-video-card {
+  transform: translateX(-5px);
 }
 
 .shorts-comments-panel {
-  margin-top: 18px;
-  padding: 16px;
-  border: 1px solid rgba(255,255,255,.09);
+  width: 100%;
+  min-width: 0;
+  max-height: min(720px, calc(100vh - 120px));
+  overflow-y: auto;
+  margin-top: 0;
+  padding: 18px;
+  border: 1px solid rgba(255,255,255,.08);
   border-radius: 16px;
-  background: var(--shorts-panel);
+  background: var(--panel);
+  animation: comments-slide-in 0.3s ease;
 }
 
 .shorts-comments-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 12px;
+  margin-bottom: 15px;
 }
 
 .shorts-comments-header h3 {
-  margin: 0;
-  font-size: 16px;
+  margin: 5px 0 0;
+  font-size: 17px;
 }
 
 .shorts-comments-header button {
-  width: 34px;
-  height: 34px;
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
   border: 0;
-  border-radius: 9px;
+  border-radius: 10px;
   background: #292936;
   color: white;
   cursor: pointer;
 }
 
+.shorts-eyebrow {
+  color: var(--accent-light);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .13em;
+}
+
+@keyframes comments-slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(18px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.shorts-comments-panel::-webkit-scrollbar {
+  width: 5px;
+}
+
+.shorts-comments-panel::-webkit-scrollbar-thumb {
+  background: #494454;
+  border-radius: 10px;
+}
+
+.shorts-state {
+  min-height: 42vh;
+  padding: 35px 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 13px;
+  text-align: center;
+}
+
+.shorts-state h2 {
+  margin: 0;
+  font-size: 23px;
+}
+
+.shorts-state p {
+  max-width: 420px;
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.7;
+}
+
 .shorts-load-more,
 .shorts-end-message {
   width: 100%;
-  padding: 24px 12px;
+  padding: 25px 12px;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 10px;
-  color: var(--shorts-muted);
+  gap: 12px;
+  color: var(--muted);
   font-size: 13px;
   text-align: center;
 }
 
-.shorts-end-message {
-  flex-direction: column;
-  padding-bottom: 48px;
+.shorts-end-message h3 {
+  margin: 0;
+  color: white;
+  font-size: 18px;
 }
 
 .shorts-end-message p {
   margin: 0;
+}
+
+.shorts-end-message button {
+  min-height: 39px;
+  padding: 9px 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid rgba(192,132,252,.25);
+  border-radius: 10px;
+  background: rgba(168,85,247,.12);
+  color: var(--accent-light);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
 }
 
 .shorts-spinner {
@@ -906,37 +1056,13 @@ const styles = `
   }
 }
 
-.shorts-state {
-  min-height: 65vh;
-  padding: 32px 20px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  text-align: center;
-}
-
-.shorts-state h2 {
-  margin: 0;
-  font-size: 23px;
-}
-
-.shorts-state p {
-  max-width: 440px;
-  margin: 0 0 10px;
-  color: var(--shorts-muted);
-  font-size: 14px;
-  line-height: 1.6;
-}
-
 .shorts-toast {
   position: fixed;
   right: 20px;
   bottom: 20px;
-  z-index: 100;
+  z-index: 110;
   max-width: min(420px, calc(100vw - 40px));
-  padding: 13px 16px;
+  padding: 13px 15px;
   display: flex;
   align-items: center;
   gap: 14px;
@@ -949,6 +1075,8 @@ const styles = `
 }
 
 .shorts-toast button {
+  display: grid;
+  place-items: center;
   border: 0;
   background: transparent;
   color: white;
@@ -965,42 +1093,73 @@ const styles = `
     font-size: 16px;
   }
 
-  .shorts-header-label {
-    display: none;
+  .shorts-feed-section {
+    width: calc(100% - 24px);
+    padding-top: 82px;
   }
 
   .shorts-layout {
-    min-height: calc(100vh - 60px);
-    padding: 18px 10px 30px;
-    gap: 0;
+    padding: 0 2px 35px;
   }
 
   .shorts-feed {
     width: 100%;
-    gap: 38px;
+    gap: 35px;
   }
 
-  .shorts-feed-item {
+  .shorts-feed-item,
+  .shorts-feed-item.has-comments {
+    width: 100%;
+    max-width: 100%;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 18px;
+  }
+
+  .shorts-video-column {
+    width: 100%;
+    justify-content: center;
+    transition: width 0.35s ease;
+  }
+
+  .shorts-video-card {
+    width: 100%;
+    max-width: 100%;
+    justify-content: center;
+    transition:
+      width 0.35s ease,
+      max-width 0.35s ease,
+      transform 0.35s ease;
+  }
+
+  .shorts-feed-item.has-comments .shorts-video-column {
     width: 100%;
   }
 
-  .shorts-video-column {
-    gap: 5px;
+  .shorts-feed-item.has-comments .shorts-video-card {
+    width: 76%;
+    max-width: 280px;
+    transform: none;
   }
 
   .shorts-comments-panel {
-    padding: 12px;
-  }
-}
-
-@media (max-width: 390px) {
-  .shorts-layout {
-    padding-left: 7px;
-    padding-right: 7px;
+    width: 100%;
+    max-height: 70vh;
+    margin-top: 0;
+    padding: 14px;
+    overflow-y: auto;
+    animation: mobile-comments-open 0.35s ease;
   }
 
-  .shorts-video-column {
-    gap: 2px;
+  @keyframes mobile-comments-open {
+    from {
+      opacity: 0;
+      transform: translateY(15px);
+    }
+
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
   }
 }
 

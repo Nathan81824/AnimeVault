@@ -1,3 +1,4 @@
+
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
@@ -36,9 +37,7 @@ export default function ShortsFeed() {
     async (isRefresh = false) => {
       setLoadError('')
 
-      if (isRefresh) {
-        setRefreshing(true)
-      }
+      if (isRefresh) setRefreshing(true)
 
       try {
         await fetchShorts()
@@ -65,7 +64,7 @@ export default function ShortsFeed() {
 
   const goToShort = useCallback(
     (index) => {
-      if (publishedShorts.length === 0) return
+      if (!publishedShorts.length) return
 
       const nextIndex = Math.max(
         0,
@@ -88,11 +87,10 @@ export default function ShortsFeed() {
     [publishedShorts.length]
   )
 
-  // Keep the active Short synchronized with vertical scrolling.
   useEffect(() => {
     const feed = feedRef.current
 
-    if (!feed || publishedShorts.length === 0) return
+    if (!feed || !publishedShorts.length) return
 
     const slides = slideRefs.current.filter(Boolean)
 
@@ -101,11 +99,10 @@ export default function ShortsFeed() {
         const visibleSlides = entries
           .filter((entry) => entry.isIntersecting)
           .sort(
-            (a, b) =>
-              b.intersectionRatio - a.intersectionRatio
+            (a, b) => b.intersectionRatio - a.intersectionRatio
           )
 
-        if (visibleSlides.length === 0) return
+        if (!visibleSlides.length) return
 
         const index = Number(
           visibleSlides[0].target.dataset.shortIndex
@@ -127,10 +124,10 @@ export default function ShortsFeed() {
     return () => observer.disconnect()
   }, [publishedShorts.length])
 
-  // Reset the active slide if the feed contents change.
   useEffect(() => {
     activeIndexRef.current = 0
     setActiveIndex(0)
+    slideRefs.current = []
 
     if (feedRef.current) {
       feedRef.current.scrollTop = 0
@@ -145,7 +142,6 @@ export default function ShortsFeed() {
     }
   }, [])
 
-  // Mouse-wheel navigation moves one Short at a time.
   const handleWheel = (event) => {
     if (Math.abs(event.deltaY) < 10) return
 
@@ -155,16 +151,15 @@ export default function ShortsFeed() {
 
     wheelLockedRef.current = true
 
-    const direction = event.deltaY > 0 ? 1 : -1
-
-    goToShort(activeIndexRef.current + direction)
+    goToShort(
+      activeIndexRef.current + (event.deltaY > 0 ? 1 : -1)
+    )
 
     wheelTimerRef.current = window.setTimeout(() => {
       wheelLockedRef.current = false
     }, 650)
   }
 
-  // Touch gestures navigate to the next or previous Short.
   const handleTouchStart = (event) => {
     const touch = event.touches[0]
 
@@ -183,7 +178,6 @@ export default function ShortsFeed() {
 
     touchStartRef.current = null
 
-    // Ignore horizontal swipes and small movements.
     if (Math.abs(deltaY) < 55) return
     if (Math.abs(deltaX) > Math.abs(deltaY)) return
 
@@ -215,7 +209,6 @@ export default function ShortsFeed() {
 
   return (
     <main className="min-w-0 flex-1 space-y-5 p-3 sm:p-5 lg:p-6">
-      {/* Header */}
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-vault-purple/20 text-vault-accent">
@@ -238,7 +231,7 @@ export default function ShortsFeed() {
             type="button"
             onClick={() => setMuted((value) => !value)}
             aria-label={muted ? 'Turn sound on' : 'Mute all Shorts'}
-            className="inline-flex items-center gap-2 rounded-xl border border-white/10 px-3 py-2.5 text-sm font-medium text-vault-text transition hover:bg-white/5"
+            className="inline-flex items-center gap-2 rounded-xl border border-white/10 px-3 py-2.5 text-sm font-medium text-vault-text transition hover:border-vault-purple/50 hover:bg-vault-purple/10"
           >
             {muted ? <VolumeX size={16} /> : <Volume2 size={16} />}
             <span className="hidden sm:inline">
@@ -250,20 +243,18 @@ export default function ShortsFeed() {
             type="button"
             onClick={() => loadFeed(true)}
             disabled={refreshing || isLoading}
-            className="inline-flex items-center gap-2 rounded-xl border border-white/10 px-3 py-2.5 text-sm font-medium text-vault-text transition hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex items-center gap-2 rounded-xl border border-white/10 px-3 py-2.5 text-sm font-medium text-vault-text transition hover:border-vault-purple/50 hover:bg-vault-purple/10 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <RefreshCw
               size={16}
-              className={
-                refreshing || isLoading ? 'animate-spin' : ''
-              }
+              className={refreshing || isLoading ? 'animate-spin' : ''}
             />
             <span className="hidden sm:inline">Refresh</span>
           </button>
 
           <Link
             to="/upload"
-            className="inline-flex items-center gap-2 rounded-xl bg-vault-purple px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-vault-purple/80"
+            className="inline-flex items-center gap-2 rounded-xl bg-vault-purple px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-vault-purple/20 transition hover:bg-vault-purple/80"
           >
             <Upload size={16} />
             <span>Upload</span>
@@ -271,7 +262,6 @@ export default function ShortsFeed() {
         </div>
       </header>
 
-      {/* Error state */}
       {(loadError || error) && publishedShorts.length === 0 && (
         <div
           role="alert"
@@ -299,7 +289,6 @@ export default function ShortsFeed() {
         </div>
       )}
 
-      {/* Loading state */}
       {showLoading && (
         <div
           className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3"
@@ -308,15 +297,15 @@ export default function ShortsFeed() {
           {Array.from({ length: 4 }).map((_, index) => (
             <div
               key={index}
-              className="animate-pulse overflow-hidden rounded-2xl border border-white/5 bg-vault-surface"
+              className="animate-pulse overflow-hidden rounded-2xl border border-vault-purple/20 bg-vault-surface"
             >
-              <div className="aspect-[9/16] max-h-[520px] bg-white/5" />
+              <div className="aspect-[9/16] max-h-[520px] bg-vault-purple/10" />
 
               <div className="flex items-center gap-3 p-3">
-                <div className="h-8 w-8 rounded-full bg-white/10" />
+                <div className="h-8 w-8 rounded-full bg-vault-purple/20" />
 
                 <div className="flex-1 space-y-2">
-                  <div className="h-3 w-24 rounded bg-white/10" />
+                  <div className="h-3 w-24 rounded bg-vault-purple/20" />
                   <div className="h-2 w-32 rounded bg-white/5" />
                 </div>
               </div>
@@ -325,13 +314,12 @@ export default function ShortsFeed() {
         </div>
       )}
 
-      {/* Empty state */}
       {!showLoading &&
         publishedShorts.length === 0 &&
         !loadError &&
         !error && (
-          <div className="flex min-h-[320px] flex-col items-center justify-center rounded-2xl border border-dashed border-white/10 bg-vault-surface/50 px-6 py-12 text-center">
-            <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-vault-purple/15 text-vault-accent">
+          <div className="flex min-h-[320px] flex-col items-center justify-center rounded-2xl border border-dashed border-vault-purple/30 bg-gradient-to-br from-vault-purple/10 via-vault-surface to-vault-purple/5 px-6 py-12 text-center">
+            <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-vault-purple/20 text-vault-accent">
               <PlaySquare size={30} />
             </div>
 
@@ -345,7 +333,7 @@ export default function ShortsFeed() {
 
             <Link
               to="/upload"
-              className="mt-5 inline-flex items-center gap-2 rounded-xl bg-vault-purple px-4 py-3 text-sm font-semibold text-white transition hover:bg-vault-purple/80"
+              className="mt-5 inline-flex items-center gap-2 rounded-xl bg-vault-purple px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-vault-purple/20 transition hover:bg-vault-purple/80"
             >
               <Upload size={17} />
               Upload your first Short
@@ -353,13 +341,24 @@ export default function ShortsFeed() {
           </div>
         )}
 
-      {/* One-Short-at-a-time feed */}
       {!showLoading && publishedShorts.length > 0 && (
         <section aria-label="Anime Shorts player">
           <div className="mb-3 flex items-center justify-between gap-3">
-            <p className="text-sm text-vault-muted">
-              Short {activeIndex + 1} of {publishedShorts.length}
-            </p>
+            <div>
+              <p className="text-sm font-semibold text-vault-text">
+                Short {activeIndex + 1} of {publishedShorts.length}
+              </p>
+              <div className="mt-2 h-1 w-32 overflow-hidden rounded-full bg-white/10">
+                <div
+                  className="h-full rounded-full bg-vault-purple transition-all duration-300"
+                  style={{
+                    width: `${
+                      ((activeIndex + 1) / publishedShorts.length) * 100
+                    }%`,
+                  }}
+                />
+              </div>
+            </div>
 
             <div className="flex items-center gap-2">
               <button
@@ -367,7 +366,7 @@ export default function ShortsFeed() {
                 onClick={() => goToShort(activeIndex - 1)}
                 disabled={activeIndex === 0}
                 aria-label="Previous Short"
-                className="rounded-full border border-white/10 bg-vault-surface p-2 text-vault-text transition hover:bg-vault-purple disabled:cursor-not-allowed disabled:opacity-30"
+                className="rounded-full border border-vault-purple/30 bg-vault-surface p-2 text-vault-text transition hover:bg-vault-purple disabled:cursor-not-allowed disabled:opacity-30"
               >
                 <ChevronUp size={20} />
               </button>
@@ -377,7 +376,7 @@ export default function ShortsFeed() {
                 onClick={() => goToShort(activeIndex + 1)}
                 disabled={activeIndex >= publishedShorts.length - 1}
                 aria-label="Next Short"
-                className="rounded-full border border-white/10 bg-vault-surface p-2 text-vault-text transition hover:bg-vault-purple disabled:cursor-not-allowed disabled:opacity-30"
+                className="rounded-full border border-vault-purple/30 bg-vault-surface p-2 text-vault-text transition hover:bg-vault-purple disabled:cursor-not-allowed disabled:opacity-30"
               >
                 <ChevronDown size={20} />
               </button>
@@ -391,7 +390,7 @@ export default function ShortsFeed() {
             onTouchStart={handleTouchStart}
             onTouchEnd={handleTouchEnd}
             onKeyDown={handleKeyDown}
-            className="mx-auto h-[min(76vh,850px)] min-h-[480px] w-full max-w-3xl overflow-y-auto overscroll-contain rounded-2xl outline-none focus-visible:ring-2 focus-visible:ring-vault-accent"
+            className="mx-auto h-[min(76vh,850px)] min-h-[480px] w-full max-w-3xl overflow-y-auto overscroll-contain rounded-[2rem] border border-vault-purple/30 bg-gradient-to-br from-vault-purple/20 via-vault-surface to-vault-purple/10 p-2 shadow-2xl shadow-vault-purple/10 outline-none focus-visible:ring-2 focus-visible:ring-vault-accent sm:p-3"
             style={{
               scrollSnapType: 'y mandatory',
               scrollbarWidth: 'thin',
@@ -412,15 +411,17 @@ export default function ShortsFeed() {
                   scrollSnapStop: 'always',
                 }}
               >
-                <div className="w-full max-w-xl">
-                  <ShortCard
-                    short={short}
-                    isActive={activeIndex === index}
-                    muted={muted}
-                    onToggleMute={() => setMuted((value) => !value)}
-                    onPrevious={() => goToShort(index - 1)}
-                    onNext={() => goToShort(index + 1)}
-                  />
+                <div className="w-full max-w-xl rounded-[1.7rem] bg-gradient-to-br from-vault-purple/50 via-vault-purple/20 to-transparent p-[2px] shadow-xl shadow-vault-purple/10">
+                  <div className="overflow-hidden rounded-[1.6rem] bg-vault-surface">
+                    <ShortCard
+                      short={short}
+                      isActive={activeIndex === index}
+                      muted={muted}
+                      onToggleMute={() => setMuted((value) => !value)}
+                      onPrevious={() => goToShort(index - 1)}
+                      onNext={() => goToShort(index + 1)}
+                    />
+                  </div>
                 </div>
               </section>
             ))}

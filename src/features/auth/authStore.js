@@ -1,4 +1,3 @@
-
 import { create } from 'zustand'
 import { authService } from './authService'
 import profileService from '../profile/profileService'
@@ -18,17 +17,22 @@ export const useAuthStore = create((set, get) => ({
   initialized: false,
   authSubscription: null,
 
-  // Prevent stale authentication and profile operations.
   authRevision: 0,
   profileRequestId: 0,
 
-  // Restore the current Supabase session.
+  setProfile: (profile) => {
+    set({ profile })
+  },
+
   initializeAuth: async () => {
     if (get().initialized) return
 
     const startingRevision = get().authRevision
 
-    set({ isLoading: true, error: '' })
+    set({
+      isLoading: true,
+      error: '',
+    })
 
     try {
       const session = await authService.getSession()
@@ -39,7 +43,6 @@ export const useAuthStore = create((set, get) => ({
         ? await authService.getCurrentUser()
         : null
 
-      // Do not overwrite a newer auth event.
       if (get().authRevision !== startingRevision) return
 
       set((state) => ({
@@ -56,7 +59,9 @@ export const useAuthStore = create((set, get) => ({
       }))
 
       if (user) {
-        void get().fetchMyProfile()
+        setTimeout(() => {
+          void get().fetchMyProfile()
+        }, 0)
       }
     } catch (error) {
       if (get().authRevision !== startingRevision) return
@@ -78,20 +83,19 @@ export const useAuthStore = create((set, get) => ({
     }
   },
 
-  // Subscribe to Supabase authentication changes.
   listenToAuthChanges: () => {
     if (get().authSubscription) return
 
-    const subscription = authService.onAuthStateChange(
-      ({ event, session, user }) => {
+    const { data, error } = authService.onAuthStateChange(
+      (event, session) => {
+        const user = session?.user || null
+
         console.log('[Auth event]', {
           event,
           hasSession: Boolean(session),
-          sessionUserId: session?.user?.id ?? null,
-          callbackUserId: user?.id ?? null,
+          userId: user?.id || null,
         })
 
-        // Only a confirmed sign-out clears an active session.
         if (event === 'SIGNED_OUT') {
           set((state) => ({
             authRevision: state.authRevision + 1,
@@ -106,11 +110,11 @@ export const useAuthStore = create((set, get) => ({
             error: '',
             successMessage: '',
           }))
+
           return
         }
 
-        // INITIAL_SESSION with no user means no session was restored.
-        if (event === 'INITIAL_SESSION' && !session?.user) {
+        if (event === 'INITIAL_SESSION' && !user) {
           set((state) => ({
             authRevision: state.authRevision + 1,
             profileRequestId: state.profileRequestId + 1,
@@ -122,51 +126,72 @@ export const useAuthStore = create((set, get) => ({
             isLoading: false,
             isLoadingProfile: false,
           }))
+
           return
         }
 
-        // Never clear an existing user because an event is incomplete.
-        if (!session?.user || !user?.id) {
-          console.warn(
-            '[Auth event] Ignored incomplete session update:',
-            event
-          )
+        if (!session || !user) {
+          console.warn('[Auth event] No valid session:', event)
           return
         }
 
         const currentUserId = get().user?.id
         const accountChanged = currentUserId !== user.id
 
+        const shouldFetchProfile =
+          accountChanged ||
+          event === 'INITIAL_SESSION' ||
+          event === 'SIGNED_IN' ||
+          event === 'USER_UPDATED'
+
         set((state) => ({
           authRevision: state.authRevision + 1,
+
           profileRequestId: accountChanged
             ? state.profileRequestId + 1
             : state.profileRequestId,
+
           user,
           session,
           isAuthenticated: true,
           initialized: true,
           isLoading: false,
           error: '',
+
           ...(accountChanged
             ? {
                 profile: null,
-                isLoadingProfile: true,
+                isLoadingProfile: false,
               }
             : {}),
         }))
 
-        // Load the profile after updating auth state.
-        if (accountChanged || !get().profile) {
-          void get().fetchMyProfile()
+        if (shouldFetchProfile) {
+          setTimeout(() => {
+            const currentState = get()
+
+            if (
+              currentState.user?.id === user.id &&
+              currentState.profile?.id !== user.id &&
+              !currentState.isLoadingProfile
+            ) {
+              void get().fetchMyProfile()
+            }
+          }, 0)
         }
       }
     )
 
-    set({ authSubscription: subscription })
+    if (error) {
+      console.error('Auth subscription error:', error)
+      return
+    }
+
+    set({
+      authSubscription: data.subscription,
+    })
   },
 
-  // Unsubscribe from Supabase auth changes.
   stopListeningToAuthChanges: () => {
     const subscription = get().authSubscription
 
@@ -174,10 +199,11 @@ export const useAuthStore = create((set, get) => ({
       subscription.unsubscribe()
     }
 
-    set({ authSubscription: null })
+    set({
+      authSubscription: null,
+    })
   },
 
-  // Fetch or create the current user's profile.
   fetchMyProfile: async () => {
     const user = get().user
 
@@ -186,6 +212,11 @@ export const useAuthStore = create((set, get) => ({
         profile: null,
         isLoadingProfile: false,
       })
+
+      return null
+    }
+
+    if (get().isLoadingProfile) {
       return null
     }
 
@@ -199,7 +230,6 @@ export const useAuthStore = create((set, get) => ({
     try {
       const result = await profileService.getOrCreateProfile(user)
 
-      // Ignore results belonging to a different account or request.
       if (
         get().user?.id !== user.id ||
         get().profileRequestId !== requestId
@@ -209,9 +239,9 @@ export const useAuthStore = create((set, get) => ({
 
       if (result?.error) {
         set({
-          error:
-            result.error.message || 'Could not load your profile.',
+          error: result.error.message || 'Could not load your profile.',
         })
+
         return null
       }
 
@@ -237,21 +267,28 @@ export const useAuthStore = create((set, get) => ({
         get().user?.id === user.id &&
         get().profileRequestId === requestId
       ) {
-        set({ isLoadingProfile: false })
+        set({
+          isLoadingProfile: false,
+        })
       }
     }
   },
 
-  // Update the current user's profile.
   updateMyProfile: async (profileData) => {
     const user = get().user
 
     if (!user?.id) {
-      set({ error: 'You must be signed in to update your profile.' })
+      set({
+        error: 'You must be signed in to update your profile.',
+      })
+
       return null
     }
 
+    const requestId = get().profileRequestId + 1
+
     set({
+      profileRequestId: requestId,
       isLoadingProfile: true,
       error: '',
       successMessage: '',
@@ -263,13 +300,18 @@ export const useAuthStore = create((set, get) => ({
         profileData
       )
 
-      if (get().user?.id !== user.id) return null
+      if (
+        get().user?.id !== user.id ||
+        get().profileRequestId !== requestId
+      ) {
+        return null
+      }
 
       if (result?.error) {
         set({
-          error:
-            result.error.message || 'Could not update your profile.',
+          error: result.error.message || 'Could not update your profile.',
         })
+
         return null
       }
 
@@ -280,7 +322,10 @@ export const useAuthStore = create((set, get) => ({
 
       return result?.data || null
     } catch (error) {
-      if (get().user?.id === user.id) {
+      if (
+        get().user?.id === user.id &&
+        get().profileRequestId === requestId
+      ) {
         set({
           error: error?.message || 'Could not update your profile.',
         })
@@ -288,14 +333,25 @@ export const useAuthStore = create((set, get) => ({
 
       return null
     } finally {
-      if (get().user?.id === user.id) {
-        set({ isLoadingProfile: false })
+      if (
+        get().user?.id === user.id &&
+        get().profileRequestId === requestId
+      ) {
+        set({
+          isLoadingProfile: false,
+        })
       }
     }
   },
 
-  // Register a new account.
   signUp: async (credentials) => {
+    if (get().isSubmitting) {
+      return {
+        success: false,
+        error: 'Please wait for the current request to finish.',
+      }
+    }
+
     set({
       isSubmitting: true,
       error: '',
@@ -305,12 +361,19 @@ export const useAuthStore = create((set, get) => ({
     try {
       const result = await authService.signUp(credentials)
 
-      if (!result) {
-        set({ error: 'Could not create your account.' })
-        return null
+      if (!result?.user) {
+        const message =
+          'Supabase did not return a user. Check your signup configuration.'
+
+        set({ error: message })
+
+        return {
+          success: false,
+          error: message,
+        }
       }
 
-      const user = result.user || null
+      const user = result.user
       const session = result.session || null
       const isSignedIn = Boolean(session && user)
 
@@ -323,27 +386,45 @@ export const useAuthStore = create((set, get) => ({
         initialized: true,
         isLoading: false,
         profile: null,
-        isLoadingProfile: isSignedIn,
+        isLoadingProfile: false,
         successMessage: result.successMessage || '',
+        error: '',
       }))
 
       if (isSignedIn) {
-        void get().fetchMyProfile()
+        setTimeout(() => {
+          void get().fetchMyProfile()
+        }, 0)
       }
 
-      return result
+      return {
+        ...result,
+        success: true,
+      }
     } catch (error) {
-      set({
-        error: error?.message || 'Could not create your account.',
-      })
-      return null
+      console.error('SUPABASE SIGNUP ERROR:', error)
+
+      const message = error?.message || 'Could not create your account.'
+
+      set({ error: message })
+
+      return {
+        success: false,
+        error: message,
+      }
     } finally {
       set({ isSubmitting: false })
     }
   },
 
-  // Sign in and update shared auth state.
   signIn: async (credentials) => {
+    if (get().isSubmitting) {
+      return {
+        success: false,
+        error: 'Please wait for the current request to finish.',
+      }
+    }
+
     set({
       isSubmitting: true,
       error: '',
@@ -354,10 +435,14 @@ export const useAuthStore = create((set, get) => ({
       const result = await authService.signIn(credentials)
 
       if (!result?.user || !result?.session) {
-        set({
-          error: 'Could not establish a signed-in session.',
-        })
-        return null
+        const message = 'Could not establish a signed-in session.'
+
+        set({ error: message })
+
+        return {
+          success: false,
+          error: message,
+        }
       }
 
       set((state) => ({
@@ -369,25 +454,37 @@ export const useAuthStore = create((set, get) => ({
         initialized: true,
         isLoading: false,
         profile: null,
-        isLoadingProfile: true,
+        isLoadingProfile: false,
+        error: '',
       }))
 
-      // Profile loading must not block the signed-in UI.
-      void get().fetchMyProfile()
+      setTimeout(() => {
+        void get().fetchMyProfile()
+      }, 0)
 
-      return result
+      return {
+        ...result,
+        success: true,
+      }
     } catch (error) {
-      set({
-        error: error?.message || 'Could not sign in.',
-      })
-      return null
+      console.error('SUPABASE LOGIN ERROR:', error)
+
+      const message = error?.message || 'Could not sign in.'
+
+      set({ error: message })
+
+      return {
+        success: false,
+        error: message,
+      }
     } finally {
       set({ isSubmitting: false })
     }
   },
 
-  // Sign out and clear account-specific state.
   signOut: async () => {
+    if (get().isSubmitting) return false
+
     set({
       isSubmitting: true,
       error: '',
@@ -396,7 +493,6 @@ export const useAuthStore = create((set, get) => ({
     try {
       await authService.signOut()
 
-      // Clear state even if the listener already handled sign-out.
       set((state) => ({
         authRevision: state.authRevision + 1,
         profileRequestId: state.profileRequestId + 1,
@@ -416,14 +512,16 @@ export const useAuthStore = create((set, get) => ({
       set({
         error: error?.message || 'Could not sign out.',
       })
+
       return false
     } finally {
       set({ isSubmitting: false })
     }
   },
 
-  // Send a password reset email.
   resetPassword: async (email) => {
+    if (get().isSubmitting) return false
+
     set({
       isSubmitting: true,
       error: '',
@@ -431,26 +529,27 @@ export const useAuthStore = create((set, get) => ({
     })
 
     try {
-      const result = await authService.resetPassword(email)
+      await authService.resetPassword(email)
 
       set({
-        successMessage:
-          result?.message || 'Password reset email sent.',
+        successMessage: 'Password reset email sent.',
       })
 
-      return result
+      return true
     } catch (error) {
       set({
         error: error?.message || 'Could not send reset email.',
       })
-      return null
+
+      return false
     } finally {
       set({ isSubmitting: false })
     }
   },
 
-  // Update the current user's password.
   updatePassword: async (password) => {
+    if (get().isSubmitting) return null
+
     set({
       isSubmitting: true,
       error: '',
@@ -461,8 +560,7 @@ export const useAuthStore = create((set, get) => ({
       const result = await authService.updatePassword(password)
 
       set({
-        successMessage:
-          result?.message || 'Password updated successfully.',
+        successMessage: 'Password updated successfully.',
       })
 
       return result
@@ -470,29 +568,31 @@ export const useAuthStore = create((set, get) => ({
       set({
         error: error?.message || 'Could not update your password.',
       })
+
       return null
     } finally {
       set({ isSubmitting: false })
     }
   },
 
-  // Clear the profile and invalidate pending profile requests.
   clearProfile: () => {
     set((state) => ({
       profile: null,
       profileRequestId: state.profileRequestId + 1,
+      isLoadingProfile: false,
     }))
   },
 
-  // Clear the current error.
-  clearError: () => set({ error: '' }),
+  clearError: () => {
+    set({ error: '' })
+  },
 
-  // Clear messages.
-  clearMessages: () =>
+  clearMessages: () => {
     set({
       error: '',
       successMessage: '',
-    }),
+    })
+  },
 }))
 
 export default useAuthStore
