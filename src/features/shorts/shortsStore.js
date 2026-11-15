@@ -6,12 +6,121 @@ import shortService from './services/shortsService'
 const LIKES_TABLE = 'short_likes'
 const COMMENTS_TABLE = 'short_comments'
 const VIEWS_TABLE = 'short_views'
+const COUNT_PAGE_SIZE = 1000
 
 const getErrorMessage = (error, fallback = 'Something went wrong.') =>
   error?.message || (typeof error === 'string' ? error : fallback)
 
 const normalizeUrl = (value) =>
   typeof value === 'string' ? value.trim() : ''
+
+function normalizeShort(short) {
+  if (!short) return short
+
+  return {
+    ...short,
+    videoUrl: short.videoUrl ?? short.video_url ?? null,
+    youtubeUrl: short.youtubeUrl ?? short.youtube_url ?? null,
+    thumbnailUrl: short.thumbnailUrl ?? short.thumbnail_url ?? null,
+    userId: short.userId ?? short.user_id ?? null,
+    likeCount: Number(short.likeCount ?? short.like_count ?? 0),
+    commentCount: Number(short.commentCount ?? short.comment_count ?? 0),
+    viewCount: Number(short.viewCount ?? short.view_count ?? 0),
+    createdAt: short.createdAt ?? short.created_at ?? null,
+    updatedAt: short.updatedAt ?? short.updated_at ?? null,
+    scheduledAt: short.scheduledAt ?? short.scheduled_at ?? null,
+    publishedAt: short.publishedAt ?? short.published_at ?? null,
+  }
+}
+
+function uniqueShorts(shorts = []) {
+  const seen = new Set()
+
+  return shorts.filter((short) => {
+    if (!short?.id || seen.has(String(short.id))) return false
+    seen.add(String(short.id))
+    return true
+  })
+}
+
+function shuffleShorts(items = [], previousItems = []) {
+  const shuffled = [...items]
+
+  for (let i = shuffled.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1))
+    ;[shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]]
+  }
+
+  const sameOrder =
+    shuffled.length > 1 &&
+    shuffled.every(
+      (item, index) =>
+        String(item.id) === String(previousItems[index]?.id),
+    )
+
+  if (sameOrder) {
+    ;[shuffled[0], shuffled[1]] = [shuffled[1], shuffled[0]]
+  }
+
+  return shuffled
+}
+
+function updateShortInList(shorts = [], shortId, changes) {
+  return shorts.map((short) =>
+    String(short.id) === String(shortId)
+      ? { ...short, ...changes }
+      : short,
+  )
+}
+
+function updateShortEverywhere(state, shortId, changes) {
+  return {
+    shorts: updateShortInList(state.shorts, shortId, changes),
+    myShorts: updateShortInList(state.myShorts, shortId, changes),
+    currentShort:
+      String(state.currentShort?.id) === String(shortId)
+        ? { ...state.currentShort, ...changes }
+        : state.currentShort,
+  }
+}
+
+function removeShortEverywhere(state, shortId) {
+  const commentsByShortId = { ...state.commentsByShortId }
+  delete commentsByShortId[shortId]
+
+  return {
+    shorts: state.shorts.filter(
+      (short) => String(short.id) !== String(shortId),
+    ),
+    myShorts: state.myShorts.filter(
+      (short) => String(short.id) !== String(shortId),
+    ),
+    currentShort:
+      String(state.currentShort?.id) === String(shortId)
+        ? null
+        : state.currentShort,
+    likedShortIds: state.likedShortIds.filter(
+      (id) => String(id) !== String(shortId),
+    ),
+    commentsByShortId,
+  }
+}
+
+function failedResult(error, extra = {}) {
+  return { success: false, error, ...extra }
+}
+
+function serviceMethod(name) {
+  const method = shortService?.[name]
+
+  if (typeof method !== 'function') {
+    throw new Error(
+      `shortService.${name} is missing. Check shortsService.js.`,
+    )
+  }
+
+  return method
+}
 
 function validateExternalUrl(value) {
   const input = normalizeUrl(value)
@@ -23,7 +132,9 @@ function validateExternalUrl(value) {
   let url
 
   try {
-    url = new URL(/^https?:\/\//i.test(input) ? input : `https://${input}`)
+    url = new URL(
+      /^https?:\/\//i.test(input) ? input : `https://${input}`,
+    )
   } catch {
     return { success: false, error: 'Enter a valid video URL.', url: '' }
   }
@@ -79,127 +190,91 @@ function getYouTubeVideoId(value) {
   }
 }
 
-function normalizeShort(short) {
-  if (!short) return short
+async function getTableCounts(table, shortIds) {
+  const counts = new Map()
 
-  return {
-    ...short,
-    videoUrl: short.videoUrl ?? short.video_url ?? null,
-    youtubeUrl: short.youtubeUrl ?? short.youtube_url ?? null,
-    thumbnailUrl: short.thumbnailUrl ?? short.thumbnail_url ?? null,
-    userId: short.userId ?? short.user_id ?? null,
-    likeCount: Number(short.likeCount ?? short.like_count ?? 0),
-    commentCount: Number(short.commentCount ?? short.comment_count ?? 0),
-    viewCount: Number(short.viewCount ?? short.view_count ?? 0),
-    createdAt: short.createdAt ?? short.created_at ?? null,
-    updatedAt: short.updatedAt ?? short.updated_at ?? null,
-    scheduledAt: short.scheduledAt ?? short.scheduled_at ?? null,
-    publishedAt: short.publishedAt ?? short.published_at ?? null,
+  if (!shortIds.length) return counts
+
+  let offset = 0
+
+  while (true) {
+    const { data, error } = await supabase
+      .from(table)
+      .select('short_id')
+      .in('short_id', shortIds)
+      .range(offset, offset + COUNT_PAGE_SIZE - 1)
+
+    if (error) throw error
+
+    const rows = data || []
+
+    for (const row of rows) {
+      counts.set(
+        row.short_id,
+        (counts.get(row.short_id) || 0) + 1,
+      )
+    }
+
+    if (rows.length < COUNT_PAGE_SIZE) break
+
+    offset += COUNT_PAGE_SIZE
   }
+
+  return counts
 }
 
-function uniqueShorts(shorts) {
-  const seen = new Set()
+async function getShortsWithCounts(shorts = []) {
+  const normalized = uniqueShorts(shorts.map(normalizeShort))
 
-  return shorts.filter((short) => {
-    if (!short?.id || seen.has(short.id)) return false
-    seen.add(short.id)
-    return true
+  if (!normalized.length) return []
+
+  const shortIds = normalized.map((short) => short.id)
+
+  const [likes, comments, views] = await Promise.all([
+    getTableCounts(LIKES_TABLE, shortIds),
+    getTableCounts(COMMENTS_TABLE, shortIds),
+    getTableCounts(VIEWS_TABLE, shortIds),
+  ])
+
+  return normalized.map((short) => {
+    const likeCount = likes.get(short.id) ?? short.likeCount
+    const commentCount = comments.get(short.id) ?? short.commentCount
+    const viewCount = views.get(short.id) ?? short.viewCount
+
+    return {
+      ...short,
+      likeCount,
+      like_count: likeCount,
+      commentCount,
+      comment_count: commentCount,
+      viewCount,
+      view_count: viewCount,
+    }
   })
-}
-
-function updateShortInList(shorts, shortId, changes) {
-  return shorts.map((short) =>
-    short.id === shortId ? { ...short, ...changes } : short,
-  )
-}
-
-function updateShortEverywhere(state, shortId, changes) {
-  return {
-    shorts: updateShortInList(state.shorts, shortId, changes),
-    myShorts: updateShortInList(state.myShorts, shortId, changes),
-    currentShort:
-      state.currentShort?.id === shortId
-        ? { ...state.currentShort, ...changes }
-        : state.currentShort,
-  }
-}
-
-function removeShortEverywhere(state, shortId) {
-  const commentsByShortId = { ...state.commentsByShortId }
-  delete commentsByShortId[shortId]
-
-  return {
-    shorts: state.shorts.filter((short) => short.id !== shortId),
-    myShorts: state.myShorts.filter((short) => short.id !== shortId),
-    currentShort:
-      state.currentShort?.id === shortId ? null : state.currentShort,
-    likedShortIds: state.likedShortIds.filter((id) => id !== shortId),
-    commentsByShortId,
-  }
-}
-
-function failedResult(error, extra = {}) {
-  return { success: false, error, ...extra }
-}
-
-function serviceMethod(name) {
-  const method = shortService?.[name]
-
-  if (typeof method !== 'function') {
-    throw new Error(`shortService.${name} is missing. Check shortsService.js.`)
-  }
-
-  return method
-}
-
-async function getExactCount(table, shortId) {
-  const { count, error } = await supabase
-    .from(table)
-    .select('*', { count: 'exact', head: true })
-    .eq('short_id', shortId)
-
-  if (error) throw error
-
-  return count ?? 0
 }
 
 async function getShortCounts(short) {
   if (!short?.id) return normalizeShort(short)
 
-  const fallback = normalizeShort(short)
+  const [result] = await getShortsWithCounts([short])
 
-  const [likes, comments, views] = await Promise.all([
-    getExactCount(LIKES_TABLE, short.id).catch(() => fallback.likeCount),
-    getExactCount(COMMENTS_TABLE, short.id).catch(
-      () => fallback.commentCount,
-    ),
-    getExactCount(VIEWS_TABLE, short.id).catch(() => fallback.viewCount),
-  ])
-
-  return {
-    ...fallback,
-    likeCount: likes,
-    like_count: likes,
-    commentCount: comments,
-    comment_count: comments,
-    viewCount: views,
-    view_count: views,
-  }
-}
-
-async function getShortsWithCounts(shorts) {
-  return Promise.all((shorts || []).map(getShortCounts))
+  return result
 }
 
 function countChanges({ likes, comments, views }) {
   return {
-    likeCount: likes,
-    like_count: likes,
-    commentCount: comments,
-    comment_count: comments,
-    viewCount: views,
-    view_count: views,
+    ...(likes !== undefined && {
+      likeCount: likes,
+      like_count: likes,
+    }),
+    ...(comments !== undefined && {
+      commentCount: comments,
+      comment_count: comments,
+    }),
+    ...(views !== undefined && {
+      viewCount: views,
+      view_count: views,
+    }),
   }
 }
 
@@ -222,9 +297,27 @@ export const useShortStore = create((set, get) => ({
 
   clearMessages: () => set({ error: null, message: null }),
 
-  // SHORTS FEED
+  setShorts: (shorts) =>
+    set({
+      shorts: uniqueShorts((shorts || []).map(normalizeShort)),
+    }),
 
-  fetchShorts: async ({ limit = 20, offset = 0, append = false } = {}) => {
+  appendShorts: (shorts) =>
+    set((state) => ({
+      shorts: uniqueShorts([
+        ...state.shorts,
+        ...(shorts || []).map(normalizeShort),
+      ]),
+    })),
+
+  updateShort: (shortId, changes) =>
+    set((state) => updateShortEverywhere(state, shortId, changes)),
+
+  fetchShorts: async ({
+    limit = 20,
+    offset = 0,
+    append = false,
+  } = {}) => {
     set({ isLoading: true, error: null })
 
     try {
@@ -235,29 +328,40 @@ export const useShortStore = create((set, get) => ({
 
       if (!result?.success) {
         const error = result?.error || 'Unable to load Shorts.'
+
         set({ isLoading: false, error })
+
         return failedResult(error, { shorts: [] })
       }
 
-      const fetchedShorts = await getShortsWithCounts(result.shorts || [])
+      const fetchedShorts = await getShortsWithCounts(
+        result.shorts || [],
+      )
 
-      set((state) => ({
-        shorts: append
-          ? uniqueShorts([...state.shorts, ...fetchedShorts])
-          : uniqueShorts(fetchedShorts),
+      const currentShorts = get().shorts
+
+      const updatedShorts = append
+        ? uniqueShorts([...currentShorts, ...fetchedShorts])
+        : shuffleShorts(fetchedShorts, currentShorts)
+
+      set({
+        shorts: updatedShorts,
         isLoading: false,
         error: null,
-      }))
+      })
 
-      return { ...result, shorts: fetchedShorts }
+      return {
+        ...result,
+        shorts: append ? fetchedShorts : updatedShorts,
+      }
     } catch (error) {
       const message = getErrorMessage(error, 'Unable to load Shorts.')
+
       set({ isLoading: false, error: message })
+
       return failedResult(message, { shorts: [] })
     }
   },
-
-  // CREATE SHORT FROM VIDEO FILE
 
   createShort: async ({
     file,
@@ -293,11 +397,13 @@ export const useShortStore = create((set, get) => ({
 
       if (!result?.success || !result.short) {
         const error = result?.error || 'Unable to create your Short.'
+
         set({ isUploading: false, error })
+
         return failedResult(error, { short: null })
       }
 
-      const createdShort = await getShortCounts(normalizeShort(result.short))
+      const createdShort = normalizeShort(result.short)
 
       set((state) => ({
         myShorts: uniqueShorts([createdShort, ...state.myShorts]),
@@ -316,12 +422,12 @@ export const useShortStore = create((set, get) => ({
       return { ...result, short: createdShort }
     } catch (error) {
       const message = getErrorMessage(error, 'Unable to create your Short.')
+
       set({ isUploading: false, error: message })
+
       return failedResult(message, { short: null })
     }
   },
-
-  // CREATE SHORT FROM EXTERNAL LINK
 
   createShortFromLink: async ({
     url,
@@ -333,16 +439,21 @@ export const useShortStore = create((set, get) => ({
     duration = null,
     publish = true,
   } = {}) => {
-    const validated = validateExternalUrl(url || videoUrl || youtubeUrl)
+    const validated = validateExternalUrl(
+      url || videoUrl || youtubeUrl,
+    )
 
     if (!validated.success) {
       set({ error: validated.error, message: null })
+
       return failedResult(validated.error, { short: null })
     }
 
     if (!normalizeUrl(title)) {
       const error = 'Enter a title for your linked Short.'
+
       set({ error, message: null })
+
       return failedResult(error, { short: null })
     }
 
@@ -355,7 +466,9 @@ export const useShortStore = create((set, get) => ({
       const result = await serviceMethod('createShortFromLink')({
         url: sourceUrl,
         videoUrl: sourceUrl,
-        ...(youtubeId ? { youtubeUrl: sourceUrl, youtubeId } : {}),
+        ...(youtubeId
+          ? { youtubeUrl: sourceUrl, youtubeId }
+          : {}),
         title: title.trim(),
         caption,
         thumbnailUrl,
@@ -364,12 +477,15 @@ export const useShortStore = create((set, get) => ({
       })
 
       if (!result?.success || !result.short) {
-        const error = result?.error || 'Unable to save this video link.'
+        const error =
+          result?.error || 'Unable to save this video link.'
+
         set({ isUploading: false, error })
+
         return failedResult(error, { short: null })
       }
 
-      const createdShort = await getShortCounts(normalizeShort(result.short))
+      const createdShort = normalizeShort(result.short)
 
       set((state) => ({
         myShorts: uniqueShorts([createdShort, ...state.myShorts]),
@@ -387,13 +503,16 @@ export const useShortStore = create((set, get) => ({
 
       return { ...result, short: createdShort }
     } catch (error) {
-      const message = getErrorMessage(error, 'Unable to save this video link.')
+      const message = getErrorMessage(
+        error,
+        'Unable to save this video link.',
+      )
+
       set({ isUploading: false, error: message })
+
       return failedResult(message, { short: null })
     }
   },
-
-  // CREATE SHORT FROM IMAGES AND AUDIO
 
   createShortFromMedia: async (options = {}) => {
     const {
@@ -408,7 +527,9 @@ export const useShortStore = create((set, get) => ({
 
     if (!images.length) {
       const error = 'Add at least one picture.'
+
       set({ error, message: null })
+
       return failedResult(error, { short: null })
     }
 
@@ -427,11 +548,13 @@ export const useShortStore = create((set, get) => ({
 
       if (!result?.success || !result.short) {
         const error = result?.error || 'Unable to create your video.'
+
         set({ isUploading: false, error })
+
         return failedResult(error, { short: null })
       }
 
-      const createdShort = await getShortCounts(normalizeShort(result.short))
+      const createdShort = normalizeShort(result.short)
 
       set((state) => ({
         myShorts: uniqueShorts([createdShort, ...state.myShorts]),
@@ -449,13 +572,16 @@ export const useShortStore = create((set, get) => ({
 
       return { ...result, short: createdShort }
     } catch (error) {
-      const message = getErrorMessage(error, 'Unable to create your video.')
+      const message = getErrorMessage(
+        error,
+        'Unable to create your video.',
+      )
+
       set({ isUploading: false, error: message })
+
       return failedResult(message, { short: null })
     }
   },
-
-  // MY SHORTS
 
   fetchMyShorts: async () => {
     set({ isLoadingMyShorts: true, error: null })
@@ -465,24 +591,41 @@ export const useShortStore = create((set, get) => ({
 
       if (!result?.success) {
         const error = result?.error || 'Unable to load your Shorts.'
+
         set({ isLoadingMyShorts: false, error })
+
         return failedResult(error, { shorts: [] })
       }
 
-      const myShorts = await getShortsWithCounts(result.shorts || [])
+      const myShorts = await getShortsWithCounts(
+        result.shorts || [],
+      )
 
-      set({ myShorts, isLoadingMyShorts: false, error: null })
+      set({
+        myShorts,
+        isLoadingMyShorts: false,
+        error: null,
+      })
 
       return { ...result, shorts: myShorts }
     } catch (error) {
-      const message = getErrorMessage(error, 'Unable to load your Shorts.')
+      const message = getErrorMessage(
+        error,
+        'Unable to load your Shorts.',
+      )
+
       set({ isLoadingMyShorts: false, error: message })
+
       return failedResult(message, { shorts: [] })
     }
   },
 
   fetchShortById: async (id) => {
-    if (!id) return failedResult('A Short ID is required.', { short: null })
+    if (!id) {
+      return failedResult('A Short ID is required.', {
+        short: null,
+      })
+    }
 
     set({ isLoading: true, error: null })
 
@@ -491,26 +634,53 @@ export const useShortStore = create((set, get) => ({
 
       if (!result?.success || !result.short) {
         const error = result?.error || 'Unable to load this Short.'
-        set({ currentShort: null, isLoading: false, error })
+
+        set({
+          currentShort: null,
+          isLoading: false,
+          error,
+        })
+
         return failedResult(error, { short: null })
       }
 
-      const currentShort = await getShortCounts(normalizeShort(result.short))
+      const currentShort = await getShortCounts(
+        normalizeShort(result.short),
+      )
 
-      set({ currentShort, isLoading: false, error: null })
+      set((state) => ({
+        currentShort,
+        shorts: uniqueShorts([
+          ...state.shorts,
+          currentShort,
+        ]),
+        isLoading: false,
+        error: null,
+      }))
 
       return { ...result, short: currentShort }
     } catch (error) {
-      const message = getErrorMessage(error, 'Unable to load this Short.')
-      set({ currentShort: null, isLoading: false, error: message })
+      const message = getErrorMessage(
+        error,
+        'Unable to load this Short.',
+      )
+
+      set({
+        currentShort: null,
+        isLoading: false,
+        error: message,
+      })
+
       return failedResult(message, { short: null })
     }
   },
 
-  // PUBLISH SHORT
-
   publishShort: async (id) => {
-    if (!id) return failedResult('A Short ID is required.', { short: null })
+    if (!id) {
+      return failedResult('A Short ID is required.', {
+        short: null,
+      })
+    }
 
     set({ error: null, message: null })
 
@@ -519,23 +689,31 @@ export const useShortStore = create((set, get) => ({
 
       if (!result?.success || !result.short) {
         const error = result?.error || 'Unable to publish your Short.'
+
         set({ error })
+
         return failedResult(error, { short: null })
       }
 
-      const publishedShort = await getShortCounts(normalizeShort(result.short))
+      const publishedShort = normalizeShort(result.short)
 
       set((state) => ({
         myShorts: uniqueShorts([
           publishedShort,
-          ...state.myShorts.filter((short) => short.id !== id),
+          ...state.myShorts.filter(
+            (short) => String(short.id) !== String(id),
+          ),
         ]),
         shorts: uniqueShorts([
           publishedShort,
-          ...state.shorts.filter((short) => short.id !== id),
+          ...state.shorts.filter(
+            (short) => String(short.id) !== String(id),
+          ),
         ]),
         currentShort:
-          state.currentShort?.id === id ? publishedShort : state.currentShort,
+          String(state.currentShort?.id) === String(id)
+            ? publishedShort
+            : state.currentShort,
         error: null,
         message: 'Your Short is now published!',
       }))
@@ -543,50 +721,73 @@ export const useShortStore = create((set, get) => ({
       return { ...result, short: publishedShort }
     } catch (error) {
       const message = getErrorMessage(error, 'Unable to publish your Short.')
+
       set({ error: message })
+
       return failedResult(message, { short: null })
     }
   },
 
-  // SCHEDULE SHORT
-
   scheduleShort: async (id, scheduledAt) => {
-    if (!id) return failedResult('A Short ID is required.', { short: null })
+    if (!id) {
+      return failedResult('A Short ID is required.', {
+        short: null,
+      })
+    }
 
     set({ error: null, message: null })
 
     try {
-      const result = await serviceMethod('scheduleShort')(id, scheduledAt)
+      const result = await serviceMethod('scheduleShort')(
+        id,
+        scheduledAt,
+      )
 
       if (!result?.success || !result.short) {
         const error = result?.error || 'Unable to schedule your Short.'
+
         set({ error })
+
         return failedResult(error, { short: null })
       }
 
-      const scheduledShort = await getShortCounts(normalizeShort(result.short))
+      const scheduledShort = normalizeShort(result.short)
 
       set((state) => ({
-        shorts: updateShortInList(state.shorts, id, scheduledShort),
-        myShorts: updateShortInList(state.myShorts, id, scheduledShort),
+        shorts: updateShortInList(
+          state.shorts,
+          id,
+          scheduledShort,
+        ),
+        myShorts: updateShortInList(
+          state.myShorts,
+          id,
+          scheduledShort,
+        ),
         currentShort:
-          state.currentShort?.id === id ? scheduledShort : state.currentShort,
+          String(state.currentShort?.id) === String(id)
+            ? scheduledShort
+            : state.currentShort,
         error: null,
-        message: 'Your Short has been scheduled!',
+        message: 'Your Short has been scheduled.',
       }))
 
       return { ...result, short: scheduledShort }
     } catch (error) {
       const message = getErrorMessage(error, 'Unable to schedule your Short.')
+
       set({ error: message })
+
       return failedResult(message, { short: null })
     }
   },
 
-  // CANCEL SHORT SCHEDULE
-
   cancelShortSchedule: async (id) => {
-    if (!id) return failedResult('A Short ID is required.', { short: null })
+    if (!id) {
+      return failedResult('A Short ID is required.', {
+        short: null,
+      })
+    }
 
     set({ error: null, message: null })
 
@@ -594,26 +795,44 @@ export const useShortStore = create((set, get) => ({
       const result = await serviceMethod('cancelShortSchedule')(id)
 
       if (!result?.success || !result.short) {
-        const error = result?.error || 'Unable to cancel this schedule.'
+        const error =
+          result?.error || 'Unable to cancel this schedule.'
+
         set({ error })
+
         return failedResult(error, { short: null })
       }
 
-      const updatedShort = await getShortCounts(normalizeShort(result.short))
+      const updatedShort = normalizeShort(result.short)
 
       set((state) => ({
-        shorts: updateShortInList(state.shorts, id, updatedShort),
-        myShorts: updateShortInList(state.myShorts, id, updatedShort),
+        shorts: updateShortInList(
+          state.shorts,
+          id,
+          updatedShort,
+        ),
+        myShorts: updateShortInList(
+          state.myShorts,
+          id,
+          updatedShort,
+        ),
         currentShort:
-          state.currentShort?.id === id ? updatedShort : state.currentShort,
+          String(state.currentShort?.id) === String(id)
+            ? updatedShort
+            : state.currentShort,
         error: null,
         message: 'Publishing schedule cancelled.',
       }))
 
       return { ...result, short: updatedShort }
     } catch (error) {
-      const message = getErrorMessage(error, 'Unable to cancel this schedule.')
+      const message = getErrorMessage(
+        error,
+        'Unable to cancel this schedule.',
+      )
+
       set({ error: message })
+
       return failedResult(message, { short: null })
     }
   },
@@ -628,7 +847,9 @@ export const useShortStore = create((set, get) => ({
 
       if (!result?.success) {
         const error = result?.error || 'Unable to delete your Short.'
+
         set({ error })
+
         return failedResult(error)
       }
 
@@ -641,12 +862,12 @@ export const useShortStore = create((set, get) => ({
       return result
     } catch (error) {
       const message = getErrorMessage(error, 'Unable to delete your Short.')
+
       set({ error: message })
+
       return failedResult(message)
     }
   },
-
-  // VIEWS
 
   recordView: async (shortId) => {
     if (!shortId) return failedResult('A Short ID is required.')
@@ -656,28 +877,33 @@ export const useShortStore = create((set, get) => ({
 
       if (!result?.success) {
         set({ error: result?.error || 'Unable to record this view.' })
+
         return result
       }
 
-      const views = await getExactCount(VIEWS_TABLE, shortId)
+      const views = await getTableCounts(
+        VIEWS_TABLE,
+        [shortId],
+      )
+
+      const viewCount = views.get(shortId) ?? 0
 
       set((state) => ({
         ...updateShortEverywhere(state, shortId, {
-          viewCount: views,
-          view_count: views,
+          ...countChanges({ views: viewCount }),
         }),
         error: null,
       }))
 
-      return { ...result, viewCount: views }
+      return { ...result, viewCount }
     } catch (error) {
       const message = getErrorMessage(error, 'Unable to record this view.')
+
       set({ error: message })
+
       return failedResult(message)
     }
   },
-
-  // LIKES
 
   checkLiked: async (shortId) => {
     if (!shortId) return failedResult('A Short ID is required.')
@@ -689,13 +915,17 @@ export const useShortStore = create((set, get) => ({
         set((state) => ({
           likedShortIds: result.liked
             ? [...new Set([...state.likedShortIds, shortId])]
-            : state.likedShortIds.filter((id) => id !== shortId),
+            : state.likedShortIds.filter(
+                (id) => String(id) !== String(shortId),
+              ),
         }))
       }
 
       return result
     } catch (error) {
-      return failedResult(getErrorMessage(error, 'Unable to check like status.'))
+      return failedResult(
+        getErrorMessage(error, 'Unable to check like status.'),
+      )
     }
   },
 
@@ -707,24 +937,33 @@ export const useShortStore = create((set, get) => ({
 
       if (!result?.success) {
         set({ error: result?.error || 'Unable to like this Short.' })
+
         return result
       }
 
-      const likes = await getExactCount(LIKES_TABLE, shortId)
+      const likes = await getTableCounts(
+        LIKES_TABLE,
+        [shortId],
+      )
+
+      const likeCount = likes.get(shortId) ?? 0
 
       set((state) => ({
         ...updateShortEverywhere(state, shortId, {
-          likeCount: likes,
-          like_count: likes,
+          ...countChanges({ likes: likeCount }),
         }),
-        likedShortIds: [...new Set([...state.likedShortIds, shortId])],
+        likedShortIds: [
+          ...new Set([...state.likedShortIds, shortId]),
+        ],
         error: null,
       }))
 
-      return { ...result, likeCount: likes }
+      return { ...result, likeCount }
     } catch (error) {
       const message = getErrorMessage(error, 'Unable to like this Short.')
+
       set({ error: message })
+
       return failedResult(message)
     }
   },
@@ -737,48 +976,66 @@ export const useShortStore = create((set, get) => ({
 
       if (!result?.success) {
         set({ error: result?.error || 'Unable to unlike this Short.' })
+
         return result
       }
 
-      const likes = await getExactCount(LIKES_TABLE, shortId)
+      const likes = await getTableCounts(
+        LIKES_TABLE,
+        [shortId],
+      )
+
+      const likeCount = likes.get(shortId) ?? 0
 
       set((state) => ({
         ...updateShortEverywhere(state, shortId, {
-          likeCount: likes,
-          like_count: likes,
+          ...countChanges({ likes: likeCount }),
         }),
-        likedShortIds: state.likedShortIds.filter((id) => id !== shortId),
+        likedShortIds: state.likedShortIds.filter(
+          (id) => String(id) !== String(shortId),
+        ),
         error: null,
       }))
 
-      return { ...result, likeCount: likes }
+      return { ...result, likeCount }
     } catch (error) {
       const message = getErrorMessage(error, 'Unable to unlike this Short.')
+
       set({ error: message })
+
       return failedResult(message)
     }
   },
 
-  // COMMENTS
-
   fetchComments: async (shortId, options = {}) => {
     if (!shortId) {
-      return failedResult('A Short ID is required.', { comments: [] })
+      return failedResult('A Short ID is required.', {
+        comments: [],
+      })
     }
 
     set({ isLoadingComments: true, error: null })
 
     try {
-      const result = await serviceMethod('getComments')(shortId, options)
+      const result = await serviceMethod('getComments')(
+        shortId,
+        options,
+      )
 
       if (!result?.success) {
         const error = result?.error || 'Unable to load comments.'
+
         set({ isLoadingComments: false, error })
+
         return failedResult(error, { comments: [] })
       }
 
       const comments = result.comments || []
-      const commentCount = await getExactCount(COMMENTS_TABLE, shortId)
+      const counts = await getTableCounts(
+        COMMENTS_TABLE,
+        [shortId],
+      )
+      const commentCount = counts.get(shortId) ?? 0
 
       set((state) => ({
         commentsByShortId: {
@@ -786,8 +1043,7 @@ export const useShortStore = create((set, get) => ({
           [shortId]: comments,
         },
         ...updateShortEverywhere(state, shortId, {
-          commentCount,
-          comment_count: commentCount,
+          ...countChanges({ comments: commentCount }),
         }),
         isLoadingComments: false,
         error: null,
@@ -796,13 +1052,19 @@ export const useShortStore = create((set, get) => ({
       return { ...result, comments, commentCount }
     } catch (error) {
       const message = getErrorMessage(error, 'Unable to load comments.')
+
       set({ isLoadingComments: false, error: message })
+
       return failedResult(message, { comments: [] })
     }
   },
 
   addComment: async (shortId, content) => {
-    if (!shortId || typeof content !== 'string' || !content.trim()) {
+    if (
+      !shortId ||
+      typeof content !== 'string' ||
+      !content.trim()
+    ) {
       return failedResult('A Short ID and comment are required.')
     }
 
@@ -814,10 +1076,15 @@ export const useShortStore = create((set, get) => ({
 
       if (!result?.success || !result.comment) {
         set({ error: result?.error || 'Unable to add your comment.' })
+
         return result
       }
 
-      const commentCount = await getExactCount(COMMENTS_TABLE, shortId)
+      const counts = await getTableCounts(
+        COMMENTS_TABLE,
+        [shortId],
+      )
+      const commentCount = counts.get(shortId) ?? 0
 
       set((state) => {
         const existing = state.commentsByShortId[shortId] || []
@@ -833,8 +1100,7 @@ export const useShortStore = create((set, get) => ({
             ],
           },
           ...updateShortEverywhere(state, shortId, {
-            commentCount,
-            comment_count: commentCount,
+            ...countChanges({ comments: commentCount }),
           }),
           error: null,
           message: 'Comment added.',
@@ -844,7 +1110,9 @@ export const useShortStore = create((set, get) => ({
       return { ...result, commentCount }
     } catch (error) {
       const message = getErrorMessage(error, 'Unable to add your comment.')
+
       set({ error: message })
+
       return failedResult(message)
     }
   },
@@ -852,7 +1120,9 @@ export const useShortStore = create((set, get) => ({
   deleteComment: async (shortIdOrCommentId, possibleCommentId) => {
     const commentId = possibleCommentId || shortIdOrCommentId
 
-    if (!commentId) return failedResult('A comment ID is required.')
+    if (!commentId) {
+      return failedResult('A comment ID is required.')
+    }
 
     try {
       const shortId =
@@ -867,29 +1137,36 @@ export const useShortStore = create((set, get) => ({
       const result = await serviceMethod('deleteComment')(commentId)
 
       if (!result?.success) {
-        set({ error: result?.error || 'Unable to delete your comment.' })
+        set({
+          error: result?.error || 'Unable to delete your comment.',
+        })
+
         return result
       }
 
       if (!shortId) {
         return {
           ...result,
-          message: 'Comment deleted. Refresh comments to update the count.',
+          message:
+            'Comment deleted. Refresh comments to update the count.',
         }
       }
 
-      const commentCount = await getExactCount(COMMENTS_TABLE, shortId)
+      const counts = await getTableCounts(
+        COMMENTS_TABLE,
+        [shortId],
+      )
+      const commentCount = counts.get(shortId) ?? 0
 
       set((state) => ({
         commentsByShortId: {
           ...state.commentsByShortId,
-          [shortId]: (state.commentsByShortId[shortId] || []).filter(
-            (comment) => comment.id !== commentId,
-          ),
+          [shortId]: (
+            state.commentsByShortId[shortId] || []
+          ).filter((comment) => comment.id !== commentId),
         },
         ...updateShortEverywhere(state, shortId, {
-          commentCount,
-          comment_count: commentCount,
+          ...countChanges({ comments: commentCount }),
         }),
         error: null,
         message: 'Comment deleted.',
@@ -898,24 +1175,35 @@ export const useShortStore = create((set, get) => ({
       return { ...result, commentCount }
     } catch (error) {
       const message = getErrorMessage(error, 'Unable to delete your comment.')
+
       set({ error: message })
+
       return failedResult(message)
     }
   },
 
-  // CREATOR SUBSCRIPTIONS
-
   checkSubscribed: async (creatorId) => {
-    if (!creatorId) return failedResult('A creator ID is required.')
+    if (!creatorId) {
+      return failedResult('A creator ID is required.')
+    }
 
     try {
-      const result = await serviceMethod('checkSubscribed')(creatorId)
+      const result = await serviceMethod('checkSubscribed')(
+        creatorId,
+      )
 
       if (result?.success) {
         set((state) => ({
           subscribedCreatorIds: result.subscribed
-            ? [...new Set([...state.subscribedCreatorIds, creatorId])]
-            : state.subscribedCreatorIds.filter((id) => id !== creatorId),
+            ? [
+                ...new Set([
+                  ...state.subscribedCreatorIds,
+                  creatorId,
+                ]),
+              ]
+            : state.subscribedCreatorIds.filter(
+                (id) => id !== creatorId,
+              ),
         }))
       }
 
@@ -928,15 +1216,22 @@ export const useShortStore = create((set, get) => ({
   },
 
   subscribeToCreator: async (creatorId) => {
-    if (!creatorId) return failedResult('A creator ID is required.')
+    if (!creatorId) {
+      return failedResult('A creator ID is required.')
+    }
 
     try {
-      const result = await serviceMethod('subscribeToCreator')(creatorId)
+      const result = await serviceMethod('subscribeToCreator')(
+        creatorId,
+      )
 
       if (result?.success) {
         set((state) => ({
           subscribedCreatorIds: [
-            ...new Set([...state.subscribedCreatorIds, creatorId]),
+            ...new Set([
+              ...state.subscribedCreatorIds,
+              creatorId,
+            ]),
           ],
           error: null,
           message: 'You are now subscribed!',
@@ -948,22 +1243,29 @@ export const useShortStore = create((set, get) => ({
       return result
     } catch (error) {
       const message = getErrorMessage(error, 'Unable to subscribe.')
+
       set({ error: message })
+
       return failedResult(message)
     }
   },
 
   unsubscribeFromCreator: async (creatorId) => {
-    if (!creatorId) return failedResult('A creator ID is required.')
+    if (!creatorId) {
+      return failedResult('A creator ID is required.')
+    }
 
     try {
-      const result = await serviceMethod('unsubscribeFromCreator')(creatorId)
+      const result = await serviceMethod('unsubscribeFromCreator')(
+        creatorId,
+      )
 
       if (result?.success) {
         set((state) => ({
-          subscribedCreatorIds: state.subscribedCreatorIds.filter(
-            (id) => id !== creatorId,
-          ),
+          subscribedCreatorIds:
+            state.subscribedCreatorIds.filter(
+              (id) => id !== creatorId,
+            ),
           error: null,
           message: 'You have unsubscribed.',
         }))
@@ -974,32 +1276,56 @@ export const useShortStore = create((set, get) => ({
       return result
     } catch (error) {
       const message = getErrorMessage(error, 'Unable to unsubscribe.')
+
       set({ error: message })
+
       return failedResult(message)
     }
   },
 
-  // SAVED SHORTS
-
   saveShort: async (shortId) => {
+    if (!shortId) return failedResult('A Short ID is required.')
+
     try {
       const result = await serviceMethod('saveShort')(shortId)
-      if (!result?.success) return result
+
+      if (!result?.success) {
+        set({ error: result?.error || 'Unable to save Short.' })
+      } else {
+        set({ error: null, message: result.message || 'Short saved.' })
+      }
+
       return result
     } catch (error) {
-      return failedResult(getErrorMessage(error, 'Unable to save Short.'))
+      const message = getErrorMessage(error, 'Unable to save Short.')
+
+      set({ error: message })
+
+      return failedResult(message)
     }
   },
 
   unsaveShort: async (shortId) => {
+    if (!shortId) return failedResult('A Short ID is required.')
+
     try {
-      return await serviceMethod('unsaveShort')(shortId)
+      const result = await serviceMethod('unsaveShort')(shortId)
+
+      if (!result?.success) {
+        set({ error: result?.error || 'Unable to unsave Short.' })
+      } else {
+        set({ error: null, message: 'Short removed from My Vault.' })
+      }
+
+      return result
     } catch (error) {
-      return failedResult(getErrorMessage(error, 'Unable to unsave Short.'))
+      const message = getErrorMessage(error, 'Unable to unsave Short.')
+
+      set({ error: message })
+
+      return failedResult(message)
     }
   },
-
-  // RESET
 
   clearCurrentShort: () => set({ currentShort: null }),
 

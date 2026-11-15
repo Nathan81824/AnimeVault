@@ -2,34 +2,60 @@
 import { useEffect, useState } from 'react'
 import { Link, NavLink, useNavigate } from 'react-router-dom'
 import {
-  Home,
-  Compass,
-  PlaySquare,
-  Bookmark,
-  Users,
-  Upload,
-  Settings,
-  Flame,
-  LogIn,
-  PanelLeftClose,
-  PanelLeftOpen,
-  LogOut,
-  UserRound,
-} from 'lucide-react'
+  FiHome,
+  FiCompass,
+  FiPlay,
+  FiBookmark,
+  FiUsers,
+  FiUpload,
+  FiSettings,
+  FiLogIn,
+  FiLogOut,
+  FiUser,
+  FiChevronLeft,
+  FiChevronRight,
+  FiZap,
+} from 'react-icons/fi'
 import { useAuthStore } from '../../features/auth/authStore'
 
 const SIDEBAR_STORAGE_KEY = 'anime-vault-sidebar-collapsed'
 
 const mainLinks = [
-  { label: 'Home', path: '/', icon: Home },
-  { label: 'Explore', path: '/explore', icon: Compass },
-  { label: 'Shorts', path: '/shorts', icon: PlaySquare },
+  { label: 'Home', path: '/', icon: FiHome },
+  { label: 'Explore', path: '/explore', icon: FiCompass },
+  { label: 'Shorts', path: '/shorts', icon: FiPlay },
 ]
 
 const libraryLinks = [
-  { label: 'My Vault', path: '/my-vault', icon: Bookmark },
-  { label: 'Channels', path: '/channels', icon: Users },
+  { label: 'My Vault', path: '/my-vault', icon: FiBookmark },
+  { label: 'Channels', path: '/channels', icon: FiUsers },
 ]
+
+function getDisplayName(profile, user) {
+  return (
+    profile?.displayName ||
+    profile?.display_name ||
+    profile?.username ||
+    user?.user_metadata?.display_name ||
+    user?.user_metadata?.username ||
+    user?.user_metadata?.name ||
+    user?.username ||
+    user?.name ||
+    user?.email?.split('@')[0] ||
+    'Your profile'
+  )
+}
+
+function getAvatarUrl(profile, user) {
+  return (
+    profile?.avatarUrl ||
+    profile?.avatar_url ||
+    user?.user_metadata?.avatar_url ||
+    user?.user_metadata?.picture ||
+    user?.avatarUrl ||
+    null
+  )
+}
 
 export default function Sidebar() {
   const [collapsed, setCollapsed] = useState(() => {
@@ -55,25 +81,13 @@ export default function Sidebar() {
     }
   }, [collapsed])
 
-  const displayName =
-    profile?.displayName ||
-    profile?.username ||
-    user?.user_metadata?.display_name ||
-    user?.user_metadata?.username ||
-    user?.user_metadata?.name ||
-    user?.username ||
-    user?.name ||
-    user?.email?.split('@')[0] ||
-    'Your profile'
-
-  const avatarUrl =
-    profile?.avatarUrl ||
-    user?.user_metadata?.avatar_url ||
-    user?.avatarUrl ||
-    null
-
+  const displayName = getDisplayName(profile, user)
+  const avatarUrl = getAvatarUrl(profile, user)
   const avatarLetter = displayName.charAt(0).toUpperCase()
-  const profilePath = user?.id ? `/profile/${user.id}` : '/profile'
+
+  const profilePath = user?.id
+    ? `/profile/${user.id}`
+    : '/login'
 
   const handleSignOut = async () => {
     if (isSubmitting) return
@@ -86,32 +100,66 @@ export default function Sidebar() {
   }
 
   const navClass = ({ isActive }) =>
-    `group flex items-center gap-3 rounded-xl px-3 py-3 text-sm font-medium transition-colors ${
+    `group relative flex items-center gap-3 rounded-xl px-3 py-3 text-sm font-semibold transition-all duration-200 ${
       isActive
-        ? 'bg-vault-purple/15 text-vault-accent'
-        : 'text-vault-muted hover:bg-white/5 hover:text-vault-text'
+        ? 'bg-orange-500/10 text-orange-400 shadow-sm shadow-orange-500/5'
+        : 'text-gray-400 hover:bg-white/[0.05] hover:text-white'
     } ${collapsed ? 'justify-center' : ''}`
+
+  const renderLinks = (links) =>
+    links.map(({ label, path, icon: Icon }) => (
+      <NavLink
+        key={path}
+        to={path}
+        end={path === '/'}
+        className={navClass}
+        title={collapsed ? label : undefined}
+      >
+        {({ isActive }) => (
+          <>
+            {isActive && (
+              <span className="absolute left-0 top-1/2 h-6 w-1 -translate-y-1/2 rounded-r-full bg-orange-500" />
+            )}
+
+            <Icon
+              className={`shrink-0 text-[19px] transition-transform duration-200 ${
+                isActive
+                  ? 'text-orange-400'
+                  : 'group-hover:scale-110'
+              }`}
+            />
+
+            {!collapsed && <span>{label}</span>}
+          </>
+        )}
+      </NavLink>
+    ))
 
   return (
     <aside
-      className={`sticky top-0 hidden h-screen shrink-0 flex-col border-r border-white/5 bg-vault-bg transition-[width] duration-300 lg:flex ${
+      className={`sticky top-0 hidden h-screen shrink-0 flex-col border-r border-white/[0.06] bg-[#080808] transition-[width] duration-300 lg:flex ${
         collapsed ? 'w-[76px]' : 'w-64'
       }`}
     >
       <div
-        className={`flex h-16 items-center border-b border-white/5 px-3 ${
+        className={`flex h-[72px] shrink-0 items-center border-b border-white/[0.06] px-3 ${
           collapsed ? 'justify-center' : 'justify-between px-5'
         }`}
       >
         {!collapsed && (
-          <Link to="/" className="flex min-w-0 items-center gap-2">
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-vault-purple text-white">
-              <Flame size={20} />
-            </span>
+          <Link to="/" className="group flex min-w-0 items-center gap-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-orange-400 to-orange-600 text-white shadow-lg shadow-orange-500/20 transition-transform group-hover:scale-105">
+              <FiZap className="text-xl" />
+            </div>
 
-            <span className="truncate text-lg font-black tracking-tight text-vault-text">
-              Anime<span className="text-vault-accent">Vault</span>
-            </span>
+            <div className="min-w-0">
+              <h2 className="truncate text-lg font-black tracking-tight text-white">
+                Anime<span className="text-orange-500">Vault</span>
+              </h2>
+              <p className="text-[9px] font-bold uppercase tracking-[0.2em] text-gray-600">
+                Your anime universe
+              </p>
+            </div>
           </Link>
         )}
 
@@ -120,65 +168,44 @@ export default function Sidebar() {
           onClick={() => setCollapsed((value) => !value)}
           aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
           title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-vault-muted transition hover:bg-white/10 hover:text-white"
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-gray-500 transition-all hover:bg-orange-500/10 hover:text-orange-400"
         >
           {collapsed ? (
-            <PanelLeftOpen size={19} />
+            <FiChevronRight className="text-lg" />
           ) : (
-            <PanelLeftClose size={19} />
+            <FiChevronLeft className="text-lg" />
           )}
         </button>
       </div>
 
       <div className="flex-1 overflow-y-auto overflow-x-hidden p-3">
-        <div className="mb-6">
+        <div className="mb-7">
           {!collapsed && (
-            <p className="mb-2 px-3 text-[10px] font-bold uppercase tracking-[0.2em] text-vault-muted/70">
+            <p className="mb-3 px-3 text-[10px] font-extrabold uppercase tracking-[0.2em] text-gray-600">
               Discover
             </p>
           )}
 
           <nav className="space-y-1" aria-label="Main navigation">
-            {mainLinks.map(({ label, path, icon: Icon }) => (
-              <NavLink
-                key={path}
-                to={path}
-                end={path === '/'}
-                className={navClass}
-                title={collapsed ? label : undefined}
-              >
-                <Icon size={19} className="shrink-0" />
-                {!collapsed && <span>{label}</span>}
-              </NavLink>
-            ))}
+            {renderLinks(mainLinks)}
           </nav>
         </div>
 
-        <div className="mb-6">
+        <div className="mb-7">
           {!collapsed && (
-            <p className="mb-2 px-3 text-[10px] font-bold uppercase tracking-[0.2em] text-vault-muted/70">
+            <p className="mb-3 px-3 text-[10px] font-extrabold uppercase tracking-[0.2em] text-gray-600">
               Your Library
             </p>
           )}
 
           <nav className="space-y-1" aria-label="Your library">
-            {libraryLinks.map(({ label, path, icon: Icon }) => (
-              <NavLink
-                key={path}
-                to={path}
-                className={navClass}
-                title={collapsed ? label : undefined}
-              >
-                <Icon size={19} className="shrink-0" />
-                {!collapsed && <span>{label}</span>}
-              </NavLink>
-            ))}
+            {renderLinks(libraryLinks)}
           </nav>
         </div>
 
-        <div className="mb-6">
+        <div className="mb-7">
           {!collapsed && (
-            <p className="mb-2 px-3 text-[10px] font-bold uppercase tracking-[0.2em] text-vault-muted/70">
+            <p className="mb-3 px-3 text-[10px] font-extrabold uppercase tracking-[0.2em] text-gray-600">
               Create
             </p>
           )}
@@ -189,8 +216,16 @@ export default function Sidebar() {
               className={navClass}
               title={collapsed ? 'Upload' : undefined}
             >
-              <Upload size={19} className="shrink-0" />
-              {!collapsed && <span>Upload</span>}
+              {({ isActive }) => (
+                <>
+                  <FiUpload
+                    className={`shrink-0 text-[19px] ${
+                      isActive ? 'text-orange-400' : ''
+                    }`}
+                  />
+                  {!collapsed && <span>Upload</span>}
+                </>
+              )}
             </NavLink>
 
             <NavLink
@@ -198,52 +233,83 @@ export default function Sidebar() {
               className={navClass}
               title={collapsed ? 'Settings' : undefined}
             >
-              <Settings size={19} className="shrink-0" />
-              {!collapsed && <span>Settings</span>}
+              {({ isActive }) => (
+                <>
+                  <FiSettings
+                    className={`shrink-0 text-[19px] ${
+                      isActive ? 'text-orange-400' : ''
+                    }`}
+                  />
+                  {!collapsed && <span>Settings</span>}
+                </>
+              )}
             </NavLink>
           </nav>
         </div>
+
+        {!collapsed && (
+          <div className="mt-8 rounded-2xl border border-orange-500/10 bg-gradient-to-br from-orange-500/[0.09] to-transparent p-4">
+            <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-xl bg-orange-500/15 text-orange-400">
+              <FiZap className="text-lg" />
+            </div>
+
+            <h3 className="text-xs font-extrabold text-white">
+              Your next anime awaits
+            </h3>
+
+            <p className="mt-1 text-[11px] leading-5 text-gray-500">
+              Discover something new and add it to your collection.
+            </p>
+
+            <Link
+              to="/explore"
+              className="mt-3 inline-flex items-center gap-2 text-[11px] font-bold text-orange-400 transition hover:text-orange-300"
+            >
+              Explore now <span>→</span>
+            </Link>
+          </div>
+        )}
       </div>
 
-      <div className="border-t border-white/5 p-3">
+      <div className="shrink-0 border-t border-white/[0.06] p-3">
         {user ? (
           <div className="space-y-2">
             <Link
               to={profilePath}
-              title={collapsed ? displayName : undefined}
+              title={collapsed ? 'Open your profile' : undefined}
               aria-label="Open your profile"
-              className={`flex items-center gap-3 rounded-xl p-2 transition hover:bg-white/5 ${
+              className={`group flex items-center gap-3 rounded-xl p-2 transition hover:bg-orange-500/[0.08] ${
                 collapsed ? 'justify-center' : ''
               }`}
             >
               {avatarUrl ? (
                 <img
                   src={avatarUrl}
-                  alt=""
-                  className="h-9 w-9 shrink-0 rounded-full object-cover"
+                  alt="Profile"
+                  className="h-9 w-9 shrink-0 rounded-full border border-orange-500/30 object-cover transition group-hover:border-orange-400"
+                  onError={(event) => {
+                    event.currentTarget.style.display = 'none'
+                  }}
                 />
               ) : (
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-vault-purple/20 text-sm font-bold text-vault-accent">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-orange-500/30 bg-orange-500/10 text-sm font-black text-orange-400">
                   {avatarLetter}
                 </div>
               )}
 
               {!collapsed && (
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-semibold text-vault-text">
+                  <p className="truncate text-sm font-bold text-white transition group-hover:text-orange-400">
                     {displayName}
                   </p>
-                  <p className="truncate text-xs text-vault-muted">
-                    {user.email || 'View your profile'}
+                  <p className="truncate text-[11px] text-gray-500">
+                    View your profile
                   </p>
                 </div>
               )}
 
               {!collapsed && (
-                <UserRound
-                  size={16}
-                  className="shrink-0 text-vault-muted"
-                />
+                <FiUser className="shrink-0 text-base text-gray-600 transition group-hover:text-orange-400" />
               )}
             </Link>
 
@@ -252,13 +318,15 @@ export default function Sidebar() {
               onClick={handleSignOut}
               disabled={isSubmitting}
               title={collapsed ? 'Sign out' : undefined}
-              className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-sm font-medium text-red-400 transition hover:bg-red-500/10 hover:text-red-300 disabled:cursor-not-allowed disabled:opacity-50 ${
+              className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-sm font-semibold text-red-400 transition hover:bg-red-500/10 hover:text-red-300 disabled:cursor-not-allowed disabled:opacity-50 ${
                 collapsed ? 'justify-center' : ''
               }`}
             >
-              <LogOut size={19} className="shrink-0" />
+              <FiLogOut className="shrink-0 text-[19px]" />
               {!collapsed && (
-                <span>{isSubmitting ? 'Signing out...' : 'Sign out'}</span>
+                <span>
+                  {isSubmitting ? 'Signing out...' : 'Sign out'}
+                </span>
               )}
             </button>
           </div>
@@ -266,11 +334,11 @@ export default function Sidebar() {
           <Link
             to="/login"
             title={collapsed ? 'Sign in' : undefined}
-            className={`flex items-center gap-3 rounded-xl px-3 py-3 text-sm font-semibold text-vault-text transition hover:bg-white/5 ${
+            className={`flex items-center gap-3 rounded-xl px-3 py-3 text-sm font-semibold text-white transition hover:bg-orange-500/10 hover:text-orange-400 ${
               collapsed ? 'justify-center' : ''
             }`}
           >
-            <LogIn size={19} className="shrink-0" />
+            <FiLogIn className="shrink-0 text-[19px]" />
             {!collapsed && <span>Sign in</span>}
           </Link>
         )}

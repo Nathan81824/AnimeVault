@@ -1,721 +1,752 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
-import { getAnimeDetails } from "../lib/jikan";
-import { getAnimeEpisodeInfo } from "../lib/episodes";
-import {
-  isYouTubeLookupConfigured,
-  resolveEpisodeVideo,
-} from "../lib/videoSources";
 
-function safeHttpUrl(value) {
-  if (typeof value !== "string" || !value.trim()) return null;
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Link, useParams } from "react-router-dom";
+import {
+  ArrowLeft,
+  Play,
+  Pause,
+  Volume2,
+  VolumeX,
+  Maximize,
+  RotateCcw,
+  RotateCw,
+  AlertCircle,
+  Clapperboard,
+  LoaderCircle,
+} from "lucide-react";
+import { getAnimeDetails } from "../lib/jikan";
+
+const YOUTUBE_API_URL = "https://www.youtube.com/iframe_api";
+
+const getYouTubeVideoId = (value) => {
+  if (!value || typeof value !== "string") return null;
+
+  const input = value.trim();
+
+  if (/^[a-zA-Z0-9_-]{11}$/.test(input)) {
+    return input;
+  }
 
   try {
-    const url = new URL(value.trim());
+    const url = new URL(input);
+    const hostname = url.hostname.replace(/^www\./, "").toLowerCase();
 
-    if (url.protocol !== "https:" && url.protocol !== "http:") {
-      return null;
+    if (hostname === "youtu.be") {
+      return url.pathname.split("/").filter(Boolean)[0] || null;
     }
 
-    return url.href;
+    if (
+      hostname === "youtube.com" ||
+      hostname === "m.youtube.com" ||
+      hostname === "youtube-nocookie.com"
+    ) {
+      const videoId = url.searchParams.get("v");
+
+      if (videoId) return videoId;
+
+      const parts = url.pathname.split("/").filter(Boolean);
+
+      if (
+        ["embed", "shorts", "live", "v"].includes(parts[0]) &&
+        parts[1]
+      ) {
+        return parts[1];
+      }
+    }
   } catch {
     return null;
   }
-}
 
-const YT_EMBED_PREFIX = "https://www.youtube-nocookie.com/embed/";
+  return null;
+};
 
-// Source already attached to the episode (catalog or YouTube URL from AniList)
-function getPlayableSource(episode) {
-  if (!episode || !episode.playableInVault) return null;
+const getTrailerId = (anime) => {
+  const trailer = anime?.trailer;
 
-  const embedUrl = safeHttpUrl(episode.embedUrl);
+  if (!trailer) return null;
 
-  if (embedUrl && embedUrl.startsWith(YT_EMBED_PREFIX)) {
-    return {
-      type: "embed",
-      url: embedUrl,
-      provider:
-        episode.sourceType === "catalog" ? "AnimeVault catalog" : "YouTube",
-      attribution: null,
-      watchUrl:
-        episode.sourceType === "catalog" || episode.sourceType === "youtube"
-          ? safeHttpUrl(episode.url)
-          : null,
-    };
-  }
+  const possibleValues = [
+    trailer.youtube_id,
+    trailer.youtubeId,
+    trailer.embedUrl,
+    trailer.embed_url,
+    trailer.url,
+    trailer.link,
+  ];
 
-  const videoUrl = safeHttpUrl(episode.videoUrl);
+  for (const value of possibleValues) {
+    const videoId = getYouTubeVideoId(value);
 
-  if (videoUrl) {
-    return {
-      type: "video",
-      url: videoUrl,
-      provider: "AnimeVault catalog",
-      attribution: null,
-      watchUrl: null,
-    };
+    if (videoId) return videoId;
   }
 
   return null;
-}
+};
 
-function getTrailerSource(anime) {
-  const embedUrl = safeHttpUrl(anime?.trailer?.embedUrl);
-
-  if (embedUrl && embedUrl.startsWith(YT_EMBED_PREFIX)) {
-    return { type: "embed", url: embedUrl };
+const loadYouTubeAPI = () => {
+  if (window.YT?.Player) {
+    return Promise.resolve(window.YT);
   }
 
-  return null;
-}
+  if (window.__animeVaultYouTubePromise) {
+    return window.__animeVaultYouTubePromise;
+  }
+
+  window.__animeVaultYouTubePromise = new Promise((resolve, reject) => {
+    let timeout;
+    let interval;
+
+    const finish = () => {
+      if (window.YT?.Player) {
+        clearTimeout(timeout);
+        clearInterval(interval);
+        resolve(window.YT);
+      }
+    };
+
+    const previousCallback = window.onYouTubeIframeAPIReady;
+
+    window.onYouTubeIframeAPIReady = () => {
+      try {
+        previousCallback?.();
+      } catch (error) {
+        console.error("Previous YouTube callback error:", error);
+      }
+
+      finish();
+    };
+
+    let script = document.querySelector(
+      `script[src="${YOUTUBE_API_URL}"]`
+    );
+
+    if (!script) {
+      script = document.createElement("script");
+      script.src = YOUTUBE_API_URL;
+      script.async = true;
+      document.head.appendChild(script);
+    }
+
+    script.addEventListener("load", finish, { once: true });
+
+    interval = setInterval(finish, 200);
+
+    timeout = setTimeout(() => {
+      clearInterval(interval);
+      reject(new Error("YouTube player took too long to load."));
+    }, 15000);
+
+    finish();
+  });
+
+  return window.__animeVaultYouTubePromise;
+};
+
+const formatTime = (seconds) => {
+  if (!Number.isFinite(seconds) || seconds < 0) return "0:00";
+
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = Math.floor(seconds % 60);
+
+  return `${minutes}:${String(remainingSeconds).padStart(2, "0")}`;
+};
 
 export default function Watch() {
   const { id } = useParams();
 
+  const playerElementRef = useRef(null);
+  const playerRef = useRef(null);
+  const volumeRef = useRef(80);
+  const progressRef = useRef(0);
+
   const [anime, setAnime] = useState(null);
-  const [episodes, setEpisodes] = useState([]);
-  const [streamingLinks, setStreamingLinks] = useState([]);
-  const [selectedEpisodeId, setSelectedEpisodeId] = useState(null);
-  const [showTrailer, setShowTrailer] = useState(false);
+  const [trailerId, setTrailerId] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [playerReady, setPlayerReady] = useState(false);
+  const [playing, setPlaying] = useState(false);
+  const [muted, setMuted] = useState(false);
+  const [volume, setVolume] = useState(80);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
   const [error, setError] = useState("");
+  const [showControls, setShowControls] = useState(true);
 
-  // Official-channel lookup state (keyed so stale results are ignored)
-  const [lookup, setLookup] = useState({ key: null, status: "idle" });
-  const [retryNonce, setRetryNonce] = useState(0);
-  const [failedUrl, setFailedUrl] = useState(null);
+  const animeTitle =
+    anime?.title_english ||
+    anime?.title ||
+    anime?.title_japanese ||
+    "Anime Trailer";
 
-  const requestIdRef = useRef(0);
+  const animeImage =
+    anime?.images?.jpg?.large_image_url ||
+    anime?.images?.jpg?.image_url ||
+    anime?.image ||
+    "";
 
-  const loadAnime = useCallback(async () => {
-    const requestId = ++requestIdRef.current;
-    const isStale = () => requestId !== requestIdRef.current;
+  useEffect(() => {
+    let active = true;
 
-    setLoading(true);
-    setError("");
-    setAnime(null);
-    setEpisodes([]);
-    setStreamingLinks([]);
-    setSelectedEpisodeId(null);
-    setShowTrailer(false);
-    setFailedUrl(null);
+    const fetchAnime = async () => {
+      setLoading(true);
+      setError("");
+      setAnime(null);
+      setTrailerId(null);
 
-    try {
-      const routeId = Number(id);
+      try {
+        const result = await getAnimeDetails(id);
 
-      if (!Number.isSafeInteger(routeId) || routeId <= 0) {
-        throw new Error("The anime ID in this URL is invalid.");
+        if (!active) return;
+
+        const animeData = result?.data || result;
+
+        if (!animeData) {
+          throw new Error("Anime information could not be found.");
+        }
+
+        setAnime(animeData);
+
+        const videoId = getTrailerId(animeData);
+
+        if (!videoId) {
+          setError("No YouTube trailer is available for this anime.");
+        } else {
+          setTrailerId(videoId);
+        }
+      } catch (err) {
+        console.error("Anime loading error:", err);
+
+        if (active) {
+          setError(
+            err?.message || "Could not load this anime. Please try again."
+          );
+        }
+      } finally {
+        if (active) setLoading(false);
       }
+    };
 
-      const animeData = await getAnimeDetails(routeId);
-
-      if (isStale()) return;
-
-      if (!animeData) {
-        throw new Error("This anime could not be found.");
-      }
-
-      const anilistId = Number(
-        animeData.anilistId ?? animeData.idAniList ?? animeData.id
-      );
-
-      if (!Number.isSafeInteger(anilistId) || anilistId <= 0) {
-        throw new Error("This anime does not have a valid AniList ID.");
-      }
-
-      const info = await getAnimeEpisodeInfo(anilistId);
-
-      if (isStale()) return;
-
-      const normalizedEpisodes = (
-        Array.isArray(info?.episodes) ? info.episodes : []
-      ).map((episode, index) => ({
-        ...episode,
-        id: episode.id ?? `episode-${index + 1}`,
-        number: Number(episode.number) || index + 1,
-        title: episode.title?.trim() || `Episode ${index + 1}`,
-        thumbnail: safeHttpUrl(episode.thumbnail),
-        url: safeHttpUrl(episode.url),
-        embedUrl: safeHttpUrl(episode.embedUrl),
-        videoUrl: safeHttpUrl(episode.videoUrl),
-      }));
-
-      const rawLinks = Array.isArray(info?.streamingLinks)
-        ? info.streamingLinks
-        : Array.isArray(info?.externalLinks)
-          ? info.externalLinks.filter(
-              (link) =>
-                String(link.type || "").toUpperCase() === "STREAMING"
-            )
-          : [];
-
-      const normalizedLinks = rawLinks
-        .map((link) => ({
-          site: link.site || "Streaming service",
-          url: safeHttpUrl(link.url),
-          type: link.type || "STREAMING",
-        }))
-        .filter((link) => link.url);
-
-      setAnime(animeData);
-      setEpisodes(normalizedEpisodes);
-      setStreamingLinks(normalizedLinks);
-
-      const firstPlayable = normalizedEpisodes.find(
-        (episode) => episode.playableInVault
-      );
-
-      setSelectedEpisodeId(
-        firstPlayable?.id ?? normalizedEpisodes[0]?.id ?? null
-      );
-    } catch (err) {
-      if (isStale()) return;
-
-      setError(
-        err?.message || "Something went wrong while loading this anime."
-      );
-    } finally {
-      if (!isStale()) {
-        setLoading(false);
-      }
+    if (id) {
+      fetchAnime();
+    } else {
+      setError("No anime ID was provided.");
+      setLoading(false);
     }
+
+    return () => {
+      active = false;
+    };
   }, [id]);
 
   useEffect(() => {
-    loadAnime();
-
-    return () => {
-      requestIdRef.current += 1;
-    };
-  }, [loadAnime]);
-
-  const selectedEpisode = useMemo(
-    () =>
-      episodes.find((episode) => episode.id === selectedEpisodeId) || null,
-    [episodes, selectedEpisodeId]
-  );
-
-  const selectedIndex = episodes.findIndex(
-    (episode) => episode.id === selectedEpisodeId
-  );
-
-  const trailerSource = useMemo(() => getTrailerSource(anime), [anime]);
-  const staticSource = useMemo(
-    () => getPlayableSource(selectedEpisode),
-    [selectedEpisode]
-  );
-
-  const isTrailerEpisode = selectedEpisode?.sourceType === "trailer";
-
-  // Only look up official channels when nothing playable is attached yet
-  const needsLookup = Boolean(
-    anime &&
-      selectedEpisode &&
-      !staticSource &&
-      !isTrailerEpisode &&
-      isYouTubeLookupConfigured
-  );
-
-  const lookupKey = needsLookup
-    ? `${anime.id}:${selectedEpisode.id}:${retryNonce}`
-    : null;
-
-  useEffect(() => {
-    if (!lookupKey) return undefined;
+    if (!trailerId || !playerElementRef.current) return;
 
     let cancelled = false;
+    let player = null;
 
-    setLookup({ key: lookupKey, status: "loading" });
+    setPlayerReady(false);
+    setPlaying(false);
+    setCurrentTime(0);
+    setDuration(0);
 
-    resolveEpisodeVideo(anime, selectedEpisode)
-      .then((result) => {
-        if (!cancelled) setLookup({ key: lookupKey, ...result });
-      })
-      .catch((err) => {
+    const createPlayer = async () => {
+      try {
+        const YT = await loadYouTubeAPI();
+
+        if (cancelled || !playerElementRef.current) return;
+
+        player = new YT.Player(playerElementRef.current, {
+          width: "100%",
+          height: "100%",
+          videoId: trailerId,
+          playerVars: {
+            autoplay: 0,
+            controls: 0,
+            disablekb: 1,
+            fs: 0,
+            modestbranding: 1,
+            rel: 0,
+            playsinline: 1,
+            iv_load_policy: 3,
+            origin: window.location.origin,
+          },
+          events: {
+            onReady: (event) => {
+              if (cancelled) return;
+
+              playerRef.current = event.target;
+              event.target.setVolume(volumeRef.current);
+              setPlayerReady(true);
+
+              const videoDuration = event.target.getDuration();
+
+              if (videoDuration) {
+                setDuration(videoDuration);
+              }
+            },
+
+            onStateChange: (event) => {
+              if (cancelled) return;
+
+              if (event.data === YT.PlayerState.PLAYING) {
+                setPlaying(true);
+                setPlayerReady(true);
+              } else if (
+                event.data === YT.PlayerState.PAUSED ||
+                event.data === YT.PlayerState.ENDED
+              ) {
+                setPlaying(false);
+              }
+
+              if (event.data === YT.PlayerState.ENDED) {
+                setCurrentTime(0);
+              }
+            },
+
+            onError: (event) => {
+              console.error("YouTube player error:", event.data);
+
+              if (!cancelled) {
+                setError(
+                  "YouTube could not play this trailer. It may be unavailable or restricted."
+                );
+              }
+            },
+          },
+        });
+      } catch (err) {
+        console.error("YouTube API error:", err);
+
         if (!cancelled) {
-          setLookup({
-            key: lookupKey,
-            status: "error",
-            message:
-              err?.message || "Could not look up an official video.",
-          });
+          setError(
+            "The trailer player could not load. Check your connection and try again."
+          );
         }
-      });
+      }
+    };
+
+    createPlayer();
 
     return () => {
       cancelled = true;
+
+      if (playerRef.current === player) {
+        playerRef.current = null;
+      }
+
+      try {
+        player?.destroy();
+      } catch {
+        // Player may not have finished initializing.
+      }
+
+      setPlayerReady(false);
+      setPlaying(false);
     };
-    // lookupKey already encodes anime, episode and retry
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lookupKey]);
+  }, [trailerId]);
 
-  const currentLookup = lookup.key === lookupKey ? lookup : null;
-  const lookedUpSource =
-    currentLookup?.status === "ready" ? currentLookup.source : null;
+  useEffect(() => {
+    if (!playerReady || !playerRef.current) return;
 
-  const lookupLoading =
-    needsLookup && (!currentLookup || currentLookup.status === "loading");
-  const lookupError =
-    needsLookup && currentLookup?.status === "error"
-      ? currentLookup.message
-      : null;
+    const interval = setInterval(() => {
+      const player = playerRef.current;
 
-  const episodeSource = staticSource || lookedUpSource;
-  const playbackFailed = Boolean(
-    episodeSource && failedUrl === episodeSource.url
+      if (!player) return;
+
+      try {
+        const time = player.getCurrentTime();
+        const videoDuration = player.getDuration();
+
+        if (Number.isFinite(time)) {
+          setCurrentTime(time);
+          progressRef.current = time;
+        }
+
+        if (Number.isFinite(videoDuration) && videoDuration > 0) {
+          setDuration(videoDuration);
+        }
+      } catch {
+        // Player may temporarily be unavailable.
+      }
+    }, 500);
+
+    return () => clearInterval(interval);
+  }, [playerReady]);
+
+  const togglePlay = useCallback(() => {
+    const player = playerRef.current;
+
+    if (!player || !playerReady) return;
+
+    try {
+      if (playing) {
+        player.pauseVideo();
+      } else {
+        player.playVideo();
+      }
+    } catch (err) {
+      console.error("Playback control error:", err);
+    }
+  }, [playing, playerReady]);
+
+  const seek = useCallback(
+    (amount) => {
+      const player = playerRef.current;
+
+      if (!player || !playerReady) return;
+
+      try {
+        const current = player.getCurrentTime() || 0;
+        const total = player.getDuration() || 0;
+        const nextTime = Math.max(0, Math.min(total, current + amount));
+
+        player.seekTo(nextTime, true);
+        setCurrentTime(nextTime);
+      } catch (err) {
+        console.error("Seek error:", err);
+      }
+    },
+    [playerReady]
   );
-  const usableEpisodeSource = playbackFailed ? null : episodeSource;
 
-  const showingTrailer = Boolean(
-    !usableEpisodeSource && showTrailer && trailerSource
-  );
-  const playableSource =
-    usableEpisodeSource || (showingTrailer ? trailerSource : null);
+  const handleProgressChange = (event) => {
+    const nextTime = Number(event.target.value);
 
-  // Prefer the episode-specific streaming page over a generic series link
-  const episodeLinkUrl = safeHttpUrl(selectedEpisode?.url);
-  const externalUrl = episodeLinkUrl || streamingLinks[0]?.url || null;
-  const externalSite = episodeLinkUrl
-    ? selectedEpisode?.site || "streaming service"
-    : streamingLinks[0]?.site || "streaming service";
+    setCurrentTime(nextTime);
 
-  const openExternalSource = () => {
-    if (externalUrl) {
-      window.open(externalUrl, "_blank", "noopener,noreferrer");
+    try {
+      playerRef.current?.seekTo(nextTime, true);
+    } catch (err) {
+      console.error("Progress error:", err);
     }
   };
 
-  const selectEpisode = (episodeId) => {
-    setSelectedEpisodeId(episodeId);
-    setShowTrailer(false);
-  };
+  const handleVolumeChange = (event) => {
+    const nextVolume = Number(event.target.value);
 
-  const goToEpisode = (direction) => {
-    const nextIndex = selectedIndex + direction;
+    volumeRef.current = nextVolume;
+    setVolume(nextVolume);
 
-    if (nextIndex >= 0 && nextIndex < episodes.length) {
-      selectEpisode(episodes[nextIndex].id);
+    try {
+      playerRef.current?.setVolume(nextVolume);
+
+      if (nextVolume > 0 && muted) {
+        playerRef.current?.unMute();
+        setMuted(false);
+      }
+
+      if (nextVolume === 0) {
+        playerRef.current?.mute();
+        setMuted(true);
+      }
+    } catch (err) {
+      console.error("Volume error:", err);
     }
   };
+
+  const toggleMute = () => {
+    const player = playerRef.current;
+
+    if (!player) return;
+
+    try {
+      if (muted) {
+        player.unMute();
+        player.setVolume(volumeRef.current || 80);
+        setMuted(false);
+      } else {
+        player.mute();
+        setMuted(true);
+      }
+    } catch (err) {
+      console.error("Mute error:", err);
+    }
+  };
+
+  const toggleFullscreen = () => {
+    const container = document.getElementById("anime-vault-player");
+
+    if (!container) return;
+
+    if (document.fullscreenElement) {
+      document.exitFullscreen?.();
+    } else {
+      container.requestFullscreen?.();
+    }
+  };
+
+  const progressPercentage =
+    duration > 0 ? Math.min((currentTime / duration) * 100, 100) : 0;
 
   if (loading) {
     return (
-      <main className="min-h-screen bg-vault-bg px-4 py-16 text-vault-text">
-        <div className="mx-auto max-w-5xl text-center">
-          <div className="mx-auto mb-4 h-12 w-12 animate-spin rounded-full border-4 border-vault-purple border-t-transparent" />
-          <p className="text-vault-muted">Loading your anime...</p>
+      <div className="flex min-h-screen items-center justify-center bg-[#080808] text-white">
+        <div className="flex flex-col items-center gap-4">
+          <LoaderCircle className="h-10 w-10 animate-spin text-orange-500" />
+          <p className="text-sm text-zinc-400">Loading anime trailer...</p>
         </div>
-      </main>
+      </div>
     );
   }
 
-  if (error || !anime) {
+  if (error && !trailerId) {
     return (
-      <main className="min-h-screen bg-vault-bg px-4 py-16 text-vault-text">
-        <div className="mx-auto max-w-xl rounded-2xl border border-white/10 bg-vault-surface p-8 text-center">
-          <h1 className="mb-3 text-2xl font-bold">Unable to load anime</h1>
+      <div className="flex min-h-screen items-center justify-center bg-[#080808] px-5 text-white">
+        <div className="w-full max-w-md rounded-2xl border border-white/10 bg-[#111] p-8 text-center">
+          <AlertCircle className="mx-auto mb-4 h-12 w-12 text-orange-500" />
 
-          <p className="mb-6 text-vault-muted">
-            {error || "The requested anime could not be found."}
+          <h1 className="mb-2 text-xl font-bold">
+            Trailer unavailable
+          </h1>
+
+          <p className="mb-6 text-sm leading-6 text-zinc-400">
+            {error}
           </p>
 
-          <div className="flex flex-wrap justify-center gap-3">
-            <button
-              type="button"
-              onClick={loadAnime}
-              className="rounded-xl bg-vault-purple px-5 py-3 font-semibold text-white transition hover:opacity-90"
-            >
-              Try again
-            </button>
-
-            <Link
-              to="/"
-              className="rounded-xl border border-white/10 px-5 py-3 font-semibold transition hover:bg-white/5"
-            >
-              Back home
-            </Link>
-          </div>
+          <Link
+            to={`/anime/${id}`}
+            className="inline-flex items-center gap-2 rounded-xl bg-orange-500 px-5 py-3 text-sm font-semibold text-black transition hover:bg-orange-400"
+          >
+            <ArrowLeft size={17} />
+            Back to anime
+          </Link>
         </div>
-      </main>
+      </div>
     );
-  }
-
-  const animeTitle =
-    anime.titleEnglish || anime.title || anime.titleRomaji || "Anime";
-
-  const counterLabel = !selectedEpisode
-    ? "No episodes available"
-    : isTrailerEpisode
-      ? "Official trailer"
-      : `Episode ${selectedEpisode.number} of ${episodes.length}`;
-
-  let unavailableMessage =
-    "No official embeddable video was found for this episode. It is most likely available only on the streaming services listed here.";
-
-  if (playbackFailed) {
-    unavailableMessage =
-      "The video failed to load. It may be blocked in your region or have been removed.";
-  } else if (!isYouTubeLookupConfigured) {
-    unavailableMessage =
-      "No playable source is attached to this episode. You can watch it on the official streaming service instead.";
   }
 
   return (
-    <main className="min-h-screen bg-vault-bg px-4 py-8 text-vault-text sm:px-6 lg:px-8">
-      <div className="mx-auto max-w-7xl">
-        <Link
-          to={`/anime/${anime.id}`}
-          className="mb-6 inline-flex items-center gap-2 text-sm text-vault-muted transition hover:text-vault-text"
-        >
-          <span aria-hidden="true">←</span>
-          Back to anime details
-        </Link>
+    <main className="min-h-screen bg-[#080808] text-white">
+      <div className="mx-auto max-w-[1600px] px-4 py-5 sm:px-6 lg:px-10">
+        <header className="mb-6 flex items-center justify-between gap-4">
+          <Link
+            to={`/anime/${id}`}
+            className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2.5 text-sm font-medium text-zinc-300 transition hover:border-orange-500/40 hover:text-white"
+          >
+            <ArrowLeft size={17} />
+            Back
+          </Link>
 
-        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
-          <section className="min-w-0">
-            <div className="mb-5">
-              <p className="mb-2 text-sm font-medium uppercase tracking-[0.2em] text-vault-purple">
-                Anime Vault Player
-              </p>
+          <div className="flex items-center gap-2 text-sm font-bold tracking-wide">
+            <Clapperboard className="h-5 w-5 text-orange-500" />
+            <span>
+              ANIME<span className="text-orange-500">VAULT</span>
+            </span>
+          </div>
+        </header>
 
-              <h1 className="text-2xl font-bold sm:text-3xl">
+        <section className="mx-auto max-w-6xl">
+          <div className="mb-5 flex flex-wrap items-end justify-between gap-4">
+            <div>
+              <div className="mb-2 flex items-center gap-2 text-xs font-bold uppercase tracking-[0.2em] text-orange-500">
+                <span className="h-1.5 w-1.5 rounded-full bg-orange-500" />
+                Official trailer
+              </div>
+
+              <h1 className="text-2xl font-black tracking-tight sm:text-3xl">
                 {animeTitle}
               </h1>
 
-              <p className="mt-2 text-vault-muted">
-                {showingTrailer
-                  ? "Official trailer"
-                  : selectedEpisode?.title || "No episode selected"}
+              <p className="mt-2 text-sm text-zinc-500">
+                Watch the official trailer on AnimeVault
               </p>
             </div>
 
-            <div className="relative aspect-video overflow-hidden rounded-2xl border border-white/10 bg-black shadow-2xl">
-              {playableSource?.type === "video" ? (
-                <video
-                  key={playableSource.url}
-                  className="h-full w-full bg-black"
-                  controls
-                  playsInline
-                  preload="metadata"
-                  src={playableSource.url}
-                  onError={() => setFailedUrl(playableSource.url)}
+            {anime?.score && (
+              <div className="rounded-xl border border-white/10 bg-white/[0.04] px-4 py-2 text-sm">
+                <span className="text-zinc-500">Score </span>
+                <span className="font-bold text-orange-400">
+                  {anime.score}
+                </span>
+              </div>
+            )}
+          </div>
+
+          <div
+            id="anime-vault-player"
+            className="group relative aspect-video w-full overflow-hidden rounded-2xl border border-white/10 bg-black shadow-2xl shadow-black/50"
+            onMouseEnter={() => setShowControls(true)}
+            onMouseLeave={() => setShowControls(false)}
+          >
+            {animeImage && !playerReady && (
+              <div
+                className="pointer-events-none absolute inset-0 z-0 bg-cover bg-center opacity-20 blur-xl"
+                style={{ backgroundImage: `url("${animeImage}")` }}
+              />
+            )}
+
+            <div
+              ref={playerElementRef}
+              className="absolute inset-0 z-10 h-full w-full"
+            />
+
+            {!playerReady && !error && (
+              <div className="pointer-events-none absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 bg-black/40">
+                <LoaderCircle className="h-10 w-10 animate-spin text-orange-500" />
+                <p className="text-sm font-medium text-zinc-300">
+                  Preparing trailer...
+                </p>
+              </div>
+            )}
+
+            {error && trailerId && (
+              <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-black/90 px-5 text-center">
+                <AlertCircle className="mb-3 h-10 w-10 text-orange-500" />
+                <p className="max-w-md text-sm text-zinc-300">{error}</p>
+                <a
+                  href={`https://www.youtube.com/watch?v=${trailerId}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-5 rounded-xl bg-orange-500 px-5 py-3 text-sm font-bold text-black transition hover:bg-orange-400"
                 >
-                  Your browser does not support HTML video.
-                </video>
-              ) : playableSource?.type === "embed" ? (
-                <iframe
-                  key={playableSource.url}
-                  src={playableSource.url}
-                  title={`${animeTitle} - ${
-                    showingTrailer
-                      ? "Trailer"
-                      : selectedEpisode?.title || "Episode"
-                  }`}
-                  className="h-full w-full border-0"
-                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
-                  allowFullScreen
-                  sandbox="allow-scripts allow-same-origin allow-presentation allow-popups allow-popups-to-escape-sandbox"
-                  referrerPolicy="strict-origin-when-cross-origin"
-                />
-              ) : lookupLoading ? (
-                <div className="flex h-full flex-col items-center justify-center px-5 py-8 text-center">
-                  <div className="mb-4 h-10 w-10 animate-spin rounded-full border-4 border-vault-purple border-t-transparent" />
-                  <p className="text-sm text-vault-muted">
-                    Looking for an official video...
-                  </p>
-                </div>
-              ) : lookupError ? (
-                <div className="flex h-full flex-col items-center justify-center overflow-y-auto px-5 py-8 text-center">
-                  <h2 className="mb-2 text-xl font-bold">
-                    Couldn't check for a video
-                  </h2>
-
-                  <p className="mb-5 max-w-md text-sm leading-6 text-vault-muted">
-                    {lookupError}
-                  </p>
-
-                  <div className="flex flex-wrap items-center justify-center gap-3">
-                    <button
-                      type="button"
-                      onClick={() => setRetryNonce((n) => n + 1)}
-                      className="rounded-xl bg-vault-purple px-5 py-3 font-semibold text-white transition hover:opacity-90"
-                    >
-                      Try again
-                    </button>
-
-                    {externalUrl && (
-                      <button
-                        type="button"
-                        onClick={openExternalSource}
-                        className="rounded-xl border border-white/10 px-5 py-3 font-semibold transition hover:bg-white/5"
-                      >
-                        Watch on {externalSite} ↗
-                      </button>
-                    )}
-                  </div>
-                </div>
-              ) : (
-                <div className="flex h-full flex-col items-center justify-center overflow-y-auto px-5 py-8 text-center">
-                  <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-vault-purple/20 text-3xl">
-                    ▶
-                  </div>
-
-                  <h2 className="mb-2 text-xl font-bold">
-                    {selectedEpisode?.title || "Episode videos unavailable"}
-                  </h2>
-
-                  <p className="mb-5 max-w-md text-sm leading-6 text-vault-muted">
-                    {unavailableMessage}
-                  </p>
-
-                  <div className="flex flex-wrap items-center justify-center gap-3">
-                    {externalUrl && (
-                      <button
-                        type="button"
-                        onClick={openExternalSource}
-                        className="rounded-xl bg-vault-purple px-5 py-3 font-semibold text-white transition hover:opacity-90"
-                      >
-                        Watch on {externalSite} ↗
-                      </button>
-                    )}
-
-                    {trailerSource && (
-                      <button
-                        type="button"
-                        onClick={() => setShowTrailer(true)}
-                        className="rounded-xl border border-white/10 px-5 py-3 font-semibold transition hover:bg-white/5"
-                      >
-                        ▶ Watch trailer
-                      </button>
-                    )}
-                  </div>
-
-                  {!trailerSource && !externalUrl && (
-                    <p className="mt-4 text-sm text-vault-muted">
-                      No trailer or streaming link is listed for this anime.
-                    </p>
-                  )}
-
-                  {import.meta.env.DEV && !isYouTubeLookupConfigured && (
-                    <p className="mt-4 max-w-md text-xs leading-5 text-vault-muted">
-                      Dev note: set VITE_YOUTUBE_API_KEY and
-                      VITE_YOUTUBE_CHANNEL_IDS in .env to enable official
-                      channel lookup.
-                    </p>
-                  )}
-                </div>
-              )}
-            </div>
-
-            {showingTrailer && (
-              <button
-                type="button"
-                onClick={() => setShowTrailer(false)}
-                className="mt-3 text-sm text-vault-muted transition hover:text-vault-text"
-              >
-                ← Back to episode
-              </button>
-            )}
-
-            {usableEpisodeSource && !isTrailerEpisode && (
-              <p className="mt-3 text-xs text-vault-muted">
-                Source: {usableEpisodeSource.provider}
-                {usableEpisodeSource.attribution
-                  ? ` · ${usableEpisodeSource.attribution}`
-                  : ""}
-                {usableEpisodeSource.label
-                  ? ` · ${usableEpisodeSource.label}`
-                  : ""}
-                {usableEpisodeSource.watchUrl && (
-                  <>
-                    {" · "}
-                    <a
-                      href={usableEpisodeSource.watchUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="underline transition hover:text-vault-text"
-                    >
-                      Open on YouTube ↗
-                    </a>
-                  </>
-                )}
-              </p>
-            )}
-
-            <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-              <button
-                type="button"
-                onClick={() => goToEpisode(-1)}
-                disabled={selectedIndex <= 0}
-                className="rounded-xl border border-white/10 px-4 py-2.5 text-sm font-semibold transition hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                ← Previous
-              </button>
-
-              <span className="text-sm text-vault-muted">{counterLabel}</span>
-
-              <button
-                type="button"
-                onClick={() => goToEpisode(1)}
-                disabled={
-                  selectedIndex < 0 || selectedIndex >= episodes.length - 1
-                }
-                className="rounded-xl border border-white/10 px-4 py-2.5 text-sm font-semibold transition hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                Next →
-              </button>
-            </div>
-
-            {streamingLinks.length > 0 && (
-              <section className="mt-8 rounded-2xl border border-white/10 bg-vault-surface p-5">
-                <h2 className="mb-3 text-lg font-bold">Streaming services</h2>
-
-                <div className="flex flex-wrap gap-3">
-                  {streamingLinks.map((link, index) => (
-                    <a
-                      key={`${link.site}-${index}`}
-                      href={link.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="rounded-xl border border-white/10 px-4 py-2.5 text-sm font-medium transition hover:border-vault-purple hover:bg-vault-purple/10"
-                    >
-                      {link.site} ↗
-                    </a>
-                  ))}
-                </div>
-
-                <p className="mt-3 text-xs leading-5 text-vault-muted">
-                  Availability varies by service and region. Links open
-                  external websites.
-                </p>
-              </section>
-            )}
-
-            <section className="mt-8 rounded-2xl border border-white/10 bg-vault-surface p-5 sm:p-6">
-              <h2 className="mb-3 text-xl font-bold">About this anime</h2>
-
-              {anime.description ? (
-                <p className="whitespace-pre-line text-sm leading-7 text-vault-muted">
-                  {anime.description.replace(/<[^>]*>/g, "")}
-                </p>
-              ) : (
-                <p className="text-sm text-vault-muted">
-                  No description is available.
-                </p>
-              )}
-
-              <div className="mt-5 flex flex-wrap gap-2">
-                {(anime.genres || []).map((genre) => (
-                  <span
-                    key={genre}
-                    className="rounded-full border border-white/10 px-3 py-1 text-xs text-vault-muted"
-                  >
-                    {genre}
-                  </span>
-                ))}
+                  Open trailer on YouTube
+                </a>
               </div>
-            </section>
-          </section>
+            )}
 
-          <aside className="h-fit overflow-hidden rounded-2xl border border-white/10 bg-vault-surface">
-            <div className="border-b border-white/10 p-5">
-              <h2 className="text-lg font-bold">Episodes</h2>
-
-              <p className="mt-1 text-sm text-vault-muted">
-                {episodes.length
-                  ? `${episodes.length} ${
-                      episodes.length === 1 ? "entry" : "entries"
-                    } available`
-                  : "No episode entries provided by AniList"}
-              </p>
-            </div>
-
-            {episodes.length > 0 ? (
-              <div className="max-h-[650px] overflow-y-auto p-3">
-                <div className="space-y-2">
-                  {episodes.map((episode) => {
-                    const isSelected = episode.id === selectedEpisodeId;
-                    const isTrailer = episode.sourceType === "trailer";
-
-                    return (
-                      <button
-                        key={episode.id}
-                        type="button"
-                        onClick={() => selectEpisode(episode.id)}
-                        aria-current={isSelected ? "true" : undefined}
-                        className={`flex w-full items-center gap-3 rounded-xl border p-3 text-left transition ${
-                          isSelected
-                            ? "border-vault-purple bg-vault-purple/15"
-                            : "border-transparent hover:border-white/10 hover:bg-white/5"
-                        }`}
-                      >
-                        <div className="flex h-12 w-16 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-black/30">
-                          {episode.thumbnail ? (
-                            <img
-                              src={episode.thumbnail}
-                              alt=""
-                              loading="lazy"
-                              referrerPolicy="no-referrer"
-                              className="h-full w-full object-cover"
-                            />
-                          ) : (
-                            <span className="text-lg">▶</span>
-                          )}
-                        </div>
-
-                        <div className="min-w-0 flex-1">
-                          <p className="text-xs text-vault-muted">
-                            {isTrailer
-                              ? "Trailer"
-                              : `Episode ${episode.number}`}
-                          </p>
-
-                          <p className="line-clamp-2 text-sm font-semibold">
-                            {episode.title}
-                          </p>
-
-                          {!episode.playableInVault && episode.site && (
-                            <p className="mt-0.5 text-[11px] text-vault-muted">
-                              Available on {episode.site}
-                            </p>
-                          )}
-                        </div>
-
-                        {isSelected && (
-                          <span
-                            className="text-vault-purple"
-                            aria-label="Selected episode"
-                          >
-                            ●
-                          </span>
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            ) : (
-              <div className="p-5">
-                <p className="text-sm leading-6 text-vault-muted">
-                  AniList does not provide streaming episode entries for every
-                  anime. Check the available streaming services
-                  {trailerSource ? " or watch the trailer." : "."}
-                </p>
-
-                {trailerSource && (
+            {playerReady && (
+              <div
+                className={`absolute inset-0 z-20 flex flex-col justify-end bg-gradient-to-t from-black/90 via-transparent to-black/20 transition-opacity duration-300 ${
+                  showControls || !playing
+                    ? "opacity-100"
+                    : "pointer-events-none opacity-0"
+                }`}
+              >
+                {!playing && (
                   <button
                     type="button"
-                    onClick={() => setShowTrailer(true)}
-                    className="mt-4 rounded-xl bg-vault-purple px-4 py-2.5 text-sm font-semibold text-white transition hover:opacity-90"
+                    onClick={togglePlay}
+                    aria-label="Play trailer"
+                    className="absolute left-1/2 top-1/2 flex h-16 w-16 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-white/20 bg-orange-500 text-black shadow-xl transition hover:scale-110 hover:bg-orange-400"
                   >
-                    ▶ Watch trailer
+                    <Play size={27} fill="currentColor" />
                   </button>
                 )}
+
+                <div className="p-4 sm:p-6">
+                  <div className="mb-3 flex items-center justify-between text-xs font-medium tabular-nums text-zinc-300">
+                    <span>{formatTime(currentTime)}</span>
+                    <span>{formatTime(duration)}</span>
+                  </div>
+
+                  <input
+                    type="range"
+                    min="0"
+                    max={duration || 100}
+                    step="0.1"
+                    value={Math.min(currentTime, duration || 100)}
+                    onChange={handleProgressChange}
+                    aria-label="Trailer progress"
+                    className="mb-4 h-1.5 w-full cursor-pointer appearance-none rounded-full bg-white/20 accent-orange-500"
+                    style={{
+                      background: `linear-gradient(to right, #f97316 ${progressPercentage}%, rgba(255,255,255,0.2) ${progressPercentage}%)`,
+                    }}
+                  />
+
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2 sm:gap-4">
+                      <button
+                        type="button"
+                        onClick={togglePlay}
+                        aria-label={playing ? "Pause trailer" : "Play trailer"}
+                        className="rounded-lg p-2 text-white transition hover:bg-white/10 hover:text-orange-400"
+                      >
+                        {playing ? (
+                          <Pause size={21} fill="currentColor" />
+                        ) : (
+                          <Play size={21} fill="currentColor" />
+                        )}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => seek(-10)}
+                        aria-label="Go back 10 seconds"
+                        className="rounded-lg p-2 text-white transition hover:bg-white/10 hover:text-orange-400"
+                      >
+                        <RotateCcw size={19} />
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => seek(10)}
+                        aria-label="Go forward 10 seconds"
+                        className="rounded-lg p-2 text-white transition hover:bg-white/10 hover:text-orange-400"
+                      >
+                        <RotateCw size={19} />
+                      </button>
+
+                      <div className="group/volume flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={toggleMute}
+                          aria-label={muted ? "Unmute" : "Mute"}
+                          className="rounded-lg p-2 text-white transition hover:bg-white/10 hover:text-orange-400"
+                        >
+                          {muted || volume === 0 ? (
+                            <VolumeX size={20} />
+                          ) : (
+                            <Volume2 size={20} />
+                          )}
+                        </button>
+
+                        <input
+                          type="range"
+                          min="0"
+                          max="100"
+                          value={muted ? 0 : volume}
+                          onChange={handleVolumeChange}
+                          aria-label="Volume"
+                          className="hidden w-20 cursor-pointer accent-orange-500 sm:block"
+                        />
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={toggleFullscreen}
+                      aria-label="Toggle fullscreen"
+                      className="rounded-lg p-2 text-white transition hover:bg-white/10 hover:text-orange-400"
+                    >
+                      <Maximize size={20} />
+                    </button>
+                  </div>
+                </div>
               </div>
             )}
-          </aside>
-        </div>
+          </div>
+
+          <div className="mt-5 flex flex-col gap-4 rounded-2xl border border-white/[0.07] bg-white/[0.025] p-4 sm:flex-row sm:items-center sm:p-5">
+            {animeImage && (
+              <img
+                src={animeImage}
+                alt={animeTitle}
+                className="h-24 w-16 rounded-lg object-cover"
+              />
+            )}
+
+            <div className="min-w-0 flex-1">
+              <h2 className="font-bold text-white">{animeTitle}</h2>
+
+              <p className="mt-1 line-clamp-2 text-sm leading-6 text-zinc-500">
+                {anime?.synopsis || "Watch the trailer for this anime."}
+              </p>
+            </div>
+
+            <Link
+              to={`/anime/${id}`}
+              className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl border border-orange-500/30 bg-orange-500/10 px-4 py-3 text-sm font-semibold text-orange-400 transition hover:bg-orange-500 hover:text-black"
+            >
+              View anime
+              <ArrowLeft className="rotate-180" size={16} />
+            </Link>
+          </div>
+
+          <p className="mt-5 text-center text-xs leading-5 text-zinc-600">
+            Trailer playback is provided by YouTube. Some videos may be
+            unavailable due to regional restrictions or the video owner's
+            settings.
+          </p>
+        </section>
       </div>
     </main>
   );

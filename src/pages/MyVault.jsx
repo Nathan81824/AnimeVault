@@ -1,3 +1,4 @@
+
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
@@ -69,13 +70,62 @@ function getItems(result, keys = []) {
   return []
 }
 
+function getShortRecord(item) {
+  return item?.short || item?.shorts || item
+}
+
+function getShortRecordId(item) {
+  const short = getShortRecord(item)
+
+  return item?.short_id || short?.id || item?.id
+}
+
+function getYouTubeVideoId(url) {
+  if (!url) return null
+
+  try {
+    const parsed = new URL(url)
+    const host = parsed.hostname.replace(/^www\./, '')
+
+    if (host === 'youtu.be') {
+      return parsed.pathname.split('/').filter(Boolean)[0] || null
+    }
+
+    if (
+      ['youtube.com', 'm.youtube.com', 'music.youtube.com'].includes(host)
+    ) {
+      if (parsed.pathname === '/watch') {
+        return parsed.searchParams.get('v')
+      }
+
+      const parts = parsed.pathname.split('/').filter(Boolean)
+
+      if (['shorts', 'embed', 'live', 'v'].includes(parts[0])) {
+        return parts[1] || null
+      }
+    }
+
+    return null
+  } catch {
+    return null
+  }
+}
+
+function getYouTubeEmbedUrl(url) {
+  const id = getYouTubeVideoId(url)
+
+  if (!id) return null
+
+  return `https://www.youtube-nocookie.com/embed/${id}?playsinline=1&rel=0`
+}
+
 function normalizeAnime(item) {
   const anime = item.anime || item
 
   return {
     ...anime,
     id: item.id || anime.id || item.anime_id,
-    anime_id: item.anime_id || anime.anime_id || anime.id,
+    anime_id: item.anime_id || anime.anime_id || anime.mal_id || anime.id,
     anime_title:
       item.anime_title ||
       item.title ||
@@ -91,8 +141,7 @@ function normalizeAnime(item) {
       anime.images?.jpg?.large_image_url ||
       anime.images?.jpg?.image_url ||
       '',
-    anime_status:
-      item.anime_status || anime.anime_status || anime.status || '',
+    anime_status: item.anime_status || anime.anime_status || anime.status || '',
     anime_episodes:
       item.anime_episodes ?? anime.anime_episodes ?? anime.episodes ?? null,
   }
@@ -100,8 +149,8 @@ function normalizeAnime(item) {
 
 function SkeletonCard() {
   return (
-    <div className="overflow-hidden rounded-2xl border border-white/[0.06] bg-[#11111b]">
-      <div className="aspect-[3/4] animate-pulse bg-white/[0.05]" />
+    <div className="overflow-hidden rounded-2xl border border-orange-500/10 bg-[#17100b]">
+      <div className="aspect-[3/4] animate-pulse bg-orange-500/[0.06]" />
       <div className="space-y-3 p-3">
         <div className="h-4 w-4/5 animate-pulse rounded bg-white/[0.06]" />
         <div className="h-3 w-2/5 animate-pulse rounded bg-white/[0.06]" />
@@ -113,13 +162,14 @@ function SkeletonCard() {
 function AnimeCard({ anime, onRemove, removing }) {
   const title = anime.anime_title || 'Untitled Anime'
   const image = anime.anime_image
+  const animeId = anime.anime_id || anime.id
 
   return (
-    <article className="group relative overflow-hidden rounded-2xl border border-white/[0.07] bg-[#11111b] transition duration-300 hover:-translate-y-1 hover:border-violet-400/30">
+    <article className="group relative overflow-hidden rounded-2xl border border-orange-500/10 bg-[#17100b] transition duration-300 hover:-translate-y-1 hover:border-orange-400/40">
       <Link
-        to={`/anime/${anime.anime_id}`}
+        to={`/anime/${animeId}`}
         aria-label={`View ${title}`}
-        className="relative block aspect-[3/4] overflow-hidden bg-[#191926]"
+        className="relative block aspect-[3/4] overflow-hidden bg-[#21160e]"
       >
         {image ? (
           <img
@@ -129,7 +179,7 @@ function AnimeCard({ anime, onRemove, removing }) {
             className="h-full w-full object-cover transition duration-500 group-hover:scale-110"
           />
         ) : (
-          <div className="flex h-full items-center justify-center text-violet-300">
+          <div className="flex h-full items-center justify-center text-orange-400">
             <Library size={42} />
           </div>
         )}
@@ -158,15 +208,15 @@ function AnimeCard({ anime, onRemove, removing }) {
           </div>
         </div>
 
-        <div className="absolute bottom-3 right-3 flex h-9 w-9 translate-y-2 items-center justify-center rounded-xl bg-violet-600 text-white opacity-0 transition group-hover:translate-y-0 group-hover:opacity-100">
+        <div className="absolute bottom-3 right-3 flex h-9 w-9 translate-y-2 items-center justify-center rounded-xl bg-orange-500 text-white opacity-0 transition group-hover:translate-y-0 group-hover:opacity-100">
           <Play size={16} fill="currentColor" />
         </div>
       </Link>
 
-      <div className="flex items-center justify-between gap-2 border-t border-white/[0.06] px-3 py-3">
-        <span className="inline-flex min-w-0 items-center gap-1.5 text-xs font-medium text-violet-300">
+      <div className="flex items-center justify-between gap-2 border-t border-orange-500/10 px-3 py-3">
+        <span className="inline-flex min-w-0 items-center gap-1.5 text-xs font-medium text-orange-300">
           <Bookmark size={13} fill="currentColor" />
-          <span className="truncate">Saved trailer</span>
+          <span className="truncate">Saved anime</span>
         </span>
 
         <button
@@ -188,15 +238,26 @@ function AnimeCard({ anime, onRemove, removing }) {
 }
 
 function RecommendationCard({ anime }) {
-  const title = anime.title || anime.titleEnglish || 'Untitled Anime'
-  const image = anime.image || anime.coverImage?.large
+  const title =
+    anime.title_english ||
+    anime.title ||
+    anime.titleEnglish ||
+    'Untitled Anime'
+
+  const image =
+    anime.images?.jpg?.large_image_url ||
+    anime.images?.jpg?.image_url ||
+    anime.image ||
+    anime.coverImage?.large
+
+  const animeId = anime.mal_id || anime.id
 
   return (
     <Link
-      to={`/anime/${anime.id}`}
-      className="group overflow-hidden rounded-2xl border border-white/[0.07] bg-[#11111b] transition hover:-translate-y-1 hover:border-violet-400/30"
+      to={`/anime/${animeId}`}
+      className="group overflow-hidden rounded-2xl border border-orange-500/10 bg-[#17100b] transition hover:-translate-y-1 hover:border-orange-400/40"
     >
-      <div className="relative aspect-[3/4] overflow-hidden bg-[#191926]">
+      <div className="relative aspect-[3/4] overflow-hidden bg-[#21160e]">
         {image ? (
           <img
             src={image}
@@ -205,14 +266,14 @@ function RecommendationCard({ anime }) {
             className="h-full w-full object-cover transition duration-500 group-hover:scale-110"
           />
         ) : (
-          <div className="flex h-full items-center justify-center text-violet-300">
+          <div className="flex h-full items-center justify-center text-orange-400">
             <Film size={30} />
           </div>
         )}
       </div>
 
       <div className="p-3">
-        <h3 className="line-clamp-2 text-sm font-semibold text-gray-200 group-hover:text-violet-300">
+        <h3 className="line-clamp-2 text-sm font-semibold text-gray-200 group-hover:text-orange-300">
           {title}
         </h3>
 
@@ -223,6 +284,42 @@ function RecommendationCard({ anime }) {
         )}
       </div>
     </Link>
+  )
+}
+
+function ShortPlayer({ url, title }) {
+  const youtubeEmbed = getYouTubeEmbedUrl(url)
+
+  if (youtubeEmbed) {
+    return (
+      <iframe
+        src={youtubeEmbed}
+        title={title || 'YouTube Short'}
+        className="h-full w-full border-0"
+        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+        allowFullScreen
+        loading="lazy"
+        referrerPolicy="strict-origin-when-cross-origin"
+      />
+    )
+  }
+
+  if (url) {
+    return (
+      <video
+        src={url}
+        controls
+        preload="metadata"
+        playsInline
+        className="h-full w-full object-contain"
+      />
+    )
+  }
+
+  return (
+    <div className="flex h-full items-center justify-center text-gray-600">
+      <Video size={40} />
+    </div>
   )
 }
 
@@ -247,12 +344,6 @@ function ShortCard({
   const title = short.title || 'Untitled Short'
   const scheduledAt = short.scheduledAt || short.scheduled_at
 
-  const isYouTube = Boolean(
-    short.youtubeUrl ||
-      short.youtube_url ||
-      (videoUrl && /youtube\.com|youtu\.be/i.test(videoUrl)),
-  )
-
   const handleSchedule = async (event) => {
     event.preventDefault()
 
@@ -270,33 +361,11 @@ function ShortCard({
   }
 
   return (
-    <article className="overflow-hidden rounded-2xl border border-white/[0.08] bg-[#11111b]">
+    <article className="overflow-hidden rounded-2xl border border-orange-500/10 bg-[#17100b] transition hover:border-orange-400/30">
       <div className="relative aspect-video bg-black">
-        {videoUrl && !isYouTube ? (
-          <video
-            src={videoUrl}
-            controls
-            preload="metadata"
-            playsInline
-            className="h-full w-full object-contain"
-          />
-        ) : videoUrl ? (
-          <a
-            href={videoUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="flex h-full flex-col items-center justify-center gap-3 text-violet-300 hover:bg-white/[0.03]"
-          >
-            <Play size={38} />
-            <span className="text-sm font-semibold">Open linked video</span>
-          </a>
-        ) : (
-          <div className="flex h-full items-center justify-center text-gray-600">
-            <Video size={40} />
-          </div>
-        )}
+        <ShortPlayer url={videoUrl} title={title} />
 
-        <span className="absolute left-3 top-3 rounded-lg border border-white/10 bg-black/70 px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-violet-200">
+        <span className="absolute left-3 top-3 rounded-lg border border-white/10 bg-black/70 px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-orange-200">
           {scheduled ? 'Scheduled' : 'Draft'}
         </span>
       </div>
@@ -350,7 +419,7 @@ function ShortCard({
                 type="button"
                 onClick={() => onPublish(short.id)}
                 disabled={busy}
-                className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl bg-violet-600 px-3 py-2.5 text-xs font-bold text-white hover:bg-violet-500 disabled:opacity-50"
+                className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl bg-orange-500 px-3 py-2.5 text-xs font-bold text-white hover:bg-orange-400 disabled:opacity-50"
               >
                 {busy ? (
                   <RefreshCw size={14} className="animate-spin" />
@@ -364,7 +433,7 @@ function ShortCard({
                 type="button"
                 onClick={() => setShowScheduler((current) => !current)}
                 disabled={busy}
-                className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl border border-violet-400/20 bg-violet-400/10 px-3 py-2.5 text-xs font-bold text-violet-200 hover:bg-violet-400/20 disabled:opacity-50"
+                className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl border border-orange-400/20 bg-orange-400/10 px-3 py-2.5 text-xs font-bold text-orange-200 hover:bg-orange-400/20 disabled:opacity-50"
               >
                 <CalendarClock size={14} />
                 Schedule
@@ -384,7 +453,7 @@ function ShortCard({
             {showScheduler && (
               <form
                 onSubmit={handleSchedule}
-                className="mt-4 rounded-xl border border-white/[0.08] bg-black/20 p-3"
+                className="mt-4 rounded-xl border border-orange-500/10 bg-black/20 p-3"
               >
                 <label className="mb-2 block text-xs font-semibold text-gray-300">
                   Choose publication date and time
@@ -396,14 +465,14 @@ function ShortCard({
                   min={getMinimumDateTime()}
                   onChange={(event) => setScheduleValue(event.target.value)}
                   required
-                  className="w-full rounded-lg border border-white/10 bg-[#09090f] px-3 py-3 text-sm text-white outline-none focus:border-violet-400/50"
+                  className="w-full rounded-lg border border-white/10 bg-[#09090f] px-3 py-3 text-sm text-white outline-none focus:border-orange-400/50"
                 />
 
                 <div className="mt-3 flex gap-2">
                   <button
                     type="submit"
                     disabled={busy || !scheduleValue}
-                    className="inline-flex flex-1 items-center justify-center gap-2 rounded-lg bg-violet-600 px-3 py-2.5 text-xs font-bold text-white hover:bg-violet-500 disabled:opacity-50"
+                    className="inline-flex flex-1 items-center justify-center gap-2 rounded-lg bg-orange-500 px-3 py-2.5 text-xs font-bold text-white hover:bg-orange-400 disabled:opacity-50"
                   >
                     <Send size={13} />
                     Confirm schedule
@@ -428,8 +497,8 @@ function ShortCard({
 
 function SectionEmpty({ icon: Icon, title, description, action }) {
   return (
-    <div className="rounded-2xl border border-dashed border-white/10 bg-[#11111b] px-5 py-12 text-center">
-      <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-violet-500/10 text-violet-300">
+    <div className="rounded-2xl border border-dashed border-orange-500/20 bg-[#17100b] px-5 py-12 text-center">
+      <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-orange-500/10 text-orange-300">
         <Icon size={25} />
       </div>
 
@@ -446,7 +515,7 @@ function SectionEmpty({ icon: Icon, title, description, action }) {
 
 const tabs = [
   { id: 'drafts', label: 'Drafts', icon: Video },
-  { id: 'trailers', label: 'Saved Trailers', icon: Bookmark },
+  { id: 'trailers', label: 'Saved Anime', icon: Bookmark },
   { id: 'playlists', label: 'Playlists', icon: ListVideo },
 ]
 
@@ -460,6 +529,7 @@ export default function MyVault() {
   const [savedShorts, setSavedShorts] = useState([])
   const [playlists, setPlaylists] = useState([])
   const [playlistShorts, setPlaylistShorts] = useState([])
+  const [playlistSavedShorts, setPlaylistSavedShorts] = useState([])
   const [activePlaylist, setActivePlaylist] = useState(null)
   const [suggestions, setSuggestions] = useState([])
 
@@ -467,6 +537,7 @@ export default function MyVault() {
   const [shortsLoading, setShortsLoading] = useState(true)
   const [savedShortsLoading, setSavedShortsLoading] = useState(true)
   const [playlistsLoading, setPlaylistsLoading] = useState(true)
+  const [playlistShortsLoading, setPlaylistShortsLoading] = useState(false)
   const [suggestionsLoading, setSuggestionsLoading] = useState(true)
 
   const [error, setError] = useState('')
@@ -563,6 +634,7 @@ export default function MyVault() {
   const loadPlaylists = useCallback(async () => {
     if (!user?.id) {
       setPlaylists([])
+      setPlaylistSavedShorts([])
       setPlaylistsLoading(false)
       return
     }
@@ -576,10 +648,39 @@ export default function MyVault() {
         throw new Error(result.error || 'Could not load playlists.')
       }
 
-      setPlaylists(getItems(result, ['playlists', 'data']))
+      const loadedPlaylists = getItems(result, ['playlists', 'data'])
+
+      setPlaylists(loadedPlaylists)
+
+      const playlistResults = await Promise.all(
+        loadedPlaylists.map(async (playlist) => {
+          try {
+            const playlistResult = await shortService.getPlaylistShorts(
+              playlist.id,
+            )
+
+            if (playlistResult?.success === false) return []
+
+            return getItems(playlistResult, [
+              'shorts',
+              'playlistShorts',
+              'data',
+            ]).map((short) => ({
+              ...short,
+              __playlistId: playlist.id,
+              __playlistName: playlist.name,
+            }))
+          } catch {
+            return []
+          }
+        }),
+      )
+
+      setPlaylistSavedShorts(playlistResults.flat())
     } catch (err) {
       setShortsError(err?.message || 'Could not load playlists.')
       setPlaylists([])
+      setPlaylistSavedShorts([])
     } finally {
       setPlaylistsLoading(false)
     }
@@ -590,6 +691,7 @@ export default function MyVault() {
 
     setActivePlaylist(playlist)
     setPlaylistShorts([])
+    setPlaylistShortsLoading(true)
 
     try {
       const result = await shortService.getPlaylistShorts(playlist.id)
@@ -603,6 +705,8 @@ export default function MyVault() {
       )
     } catch (err) {
       setShortsError(err?.message || 'Could not load playlist Shorts.')
+    } finally {
+      setPlaylistShortsLoading(false)
     }
   }, [])
 
@@ -623,7 +727,7 @@ export default function MyVault() {
         const response = await getPopularAnime({ page: 1, perPage: 6 })
         const results = Array.isArray(response)
           ? response
-          : response?.results || []
+          : response?.results || response?.data || []
 
         if (active) setSuggestions(results.slice(0, 6))
       } catch {
@@ -673,6 +777,54 @@ export default function MyVault() {
   const totalDraftVideos = drafts.length + scheduledShorts.length
   const playlistCount = playlists.length
 
+  const combinedSavedShorts = useMemo(() => {
+    const unique = new Map()
+
+    savedShorts.forEach((item) => {
+      const id = getShortRecordId(item)
+
+      if (!id) return
+
+      unique.set(String(id), {
+        ...item,
+        __isSaved: true,
+        __playlistIds: [],
+      })
+    })
+
+    playlistSavedShorts.forEach((item) => {
+      const id = getShortRecordId(item)
+
+      if (!id) return
+
+      const key = String(id)
+      const existing = unique.get(key)
+
+      if (existing) {
+        const playlistIds = existing.__playlistIds || []
+
+        if (!playlistIds.includes(item.__playlistId)) {
+          existing.__playlistIds = [
+            ...playlistIds,
+            item.__playlistId,
+          ]
+        }
+
+        unique.set(key, existing)
+      } else {
+        unique.set(key, {
+          ...item,
+          __isSaved: false,
+          __playlistIds: [item.__playlistId],
+        })
+      }
+    })
+
+    return Array.from(unique.values())
+  }, [savedShorts, playlistSavedShorts])
+
+  const savedShortsCount = combinedSavedShorts.length
+
   const handleRemoveAnime = useCallback(async () => {
     if (!removingAnime || !user?.id || !supabase) return
 
@@ -709,7 +861,13 @@ export default function MyVault() {
       setNotice('')
 
       try {
-        const result = await shortService[action](id, ...args)
+        const serviceAction = shortService[action]
+
+        if (typeof serviceAction !== 'function') {
+          throw new Error(`The Shorts service does not support ${action}.`)
+        }
+
+        const result = await serviceAction(id, ...args)
 
         if (!result?.success) {
           throw new Error(result?.error || 'Short action failed.')
@@ -777,17 +935,41 @@ export default function MyVault() {
         throw new Error(result?.error || 'Could not remove saved Short.')
       }
 
-      setSavedShorts((current) =>
-        current.filter((item) => {
-          const id = item.short_id || item.id || item.short?.id
-          return String(id) !== String(shortId)
-        }),
-      )
-
       setNotice('Short removed from your saved collection.')
-      await loadPlaylists()
+
+      await Promise.all([loadSavedShorts(), loadPlaylists()])
     } catch (err) {
       setShortsError(err?.message || 'Could not remove saved Short.')
+    } finally {
+      setBusyShortId(null)
+    }
+  }
+
+  const handleRemoveFromPlaylistById = async (playlistId, shortId) => {
+    if (!playlistId || !shortId) return
+
+    setBusyShortId(shortId)
+    setShortsError('')
+
+    try {
+      const result = await shortService.removeShortFromPlaylist(
+        playlistId,
+        shortId,
+      )
+
+      if (!result?.success) {
+        throw new Error(result?.error || 'Could not remove Short.')
+      }
+
+      if (activePlaylist?.id === playlistId) {
+        await loadPlaylistShorts(activePlaylist)
+      }
+
+      await loadPlaylists()
+
+      setNotice('Short removed from playlist.')
+    } catch (err) {
+      setShortsError(err?.message || 'Could not remove Short.')
     } finally {
       setBusyShortId(null)
     }
@@ -796,27 +978,12 @@ export default function MyVault() {
   const handleRemoveFromPlaylist = async (shortId) => {
     if (!activePlaylist?.id) return
 
-    setBusyShortId(shortId)
-
-    try {
-      const result = await shortService.removeShortFromPlaylist(
-        activePlaylist.id,
-        shortId,
-      )
-
-      if (!result?.success) {
-        throw new Error(result?.error || 'Could not remove Short.')
-      }
-
-      await loadPlaylistShorts(activePlaylist)
-    } catch (err) {
-      setShortsError(err?.message || 'Could not remove Short.')
-    } finally {
-      setBusyShortId(null)
-    }
+    await handleRemoveFromPlaylistById(activePlaylist.id, shortId)
   }
 
   const refreshAll = () => {
+    setNotice('')
+    setShortsError('')
     loadVault()
     loadShorts()
     loadSavedShorts()
@@ -824,8 +991,8 @@ export default function MyVault() {
   }
 
   const renderSavedShort = (item, index, inPlaylist = false) => {
-    const short = item.short || item.shorts || item
-    const shortId = item.short_id || short.id || item.id
+    const short = getShortRecord(item)
+    const shortId = getShortRecordId(item)
 
     const videoUrl =
       short.video_url ||
@@ -833,35 +1000,31 @@ export default function MyVault() {
       short.youtube_url ||
       short.youtubeUrl
 
+    const isSaved = item.__isSaved !== false
+
+    const handleRemove = () => {
+      if (inPlaylist) {
+        handleRemoveFromPlaylist(shortId)
+      } else if (isSaved) {
+        handleRemoveSavedShort(shortId)
+      } else {
+        const playlistId =
+          item.__playlistIds?.[0] || item.__playlistId
+
+        handleRemoveFromPlaylistById(playlistId, shortId)
+      }
+    }
+
     return (
       <article
-        key={shortId || index}
-        className="overflow-hidden rounded-2xl border border-white/[0.08] bg-[#11111b]"
+        key={`${shortId || index}-${inPlaylist ? 'playlist' : 'saved'}`}
+        className="overflow-hidden rounded-2xl border border-orange-500/10 bg-[#17100b] transition hover:border-orange-400/30"
       >
         <div className="relative aspect-video bg-black">
-          {videoUrl && !/youtube\.com|youtu\.be/i.test(videoUrl) ? (
-            <video
-              src={videoUrl}
-              controls
-              preload="metadata"
-              playsInline
-              className="h-full w-full object-contain"
-            />
-          ) : videoUrl ? (
-            <a
-              href={videoUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="flex h-full flex-col items-center justify-center gap-3 text-violet-300 hover:bg-white/[0.03]"
-            >
-              <Play size={35} />
-              Open video
-            </a>
-          ) : (
-            <div className="flex h-full items-center justify-center text-gray-600">
-              <Video size={36} />
-            </div>
-          )}
+          <ShortPlayer
+            url={videoUrl}
+            title={short.title || 'Saved Short'}
+          />
         </div>
 
         <div className="p-4">
@@ -876,20 +1039,17 @@ export default function MyVault() {
           )}
 
           <div className="mt-4 flex items-center justify-between gap-2">
-            <span className="text-xs text-violet-300">
-              {short.creator?.username ||
-                short.profiles?.username ||
-                short.creator_name ||
-                'Saved Short'}
+            <span className="text-xs text-orange-300">
+              {inPlaylist
+                ? activePlaylist?.name || 'Playlist Short'
+                : isSaved
+                  ? 'Saved Short'
+                  : 'Saved through playlist'}
             </span>
 
             <button
               type="button"
-              onClick={() =>
-                inPlaylist
-                  ? handleRemoveFromPlaylist(shortId)
-                  : handleRemoveSavedShort(shortId)
-              }
+              onClick={handleRemove}
               disabled={busyShortId === shortId}
               className="inline-flex items-center gap-2 rounded-lg border border-red-500/20 px-3 py-2 text-xs font-semibold text-red-300 hover:bg-red-500/10 disabled:opacity-50"
             >
@@ -907,28 +1067,35 @@ export default function MyVault() {
   }
 
   return (
-    <main className="min-h-screen overflow-hidden bg-[#09090f] px-4 py-8 text-white sm:px-6 sm:py-10 lg:px-10">
-      <div className="pointer-events-none fixed inset-x-0 top-0 -z-0 h-96 bg-[radial-gradient(ellipse_at_top,rgba(124,58,237,0.13),transparent_65%)]" />
+    <main className="min-h-screen overflow-hidden bg-[#100a05] px-4 py-8 text-white sm:px-6 sm:py-10 lg:px-10">
+      <div className="pointer-events-none fixed inset-x-0 top-0 -z-0 h-96 bg-[radial-gradient(ellipse_at_top,rgba(249,115,22,0.18),transparent_65%)]" />
 
       <div className="relative mx-auto max-w-7xl">
-        <section className="relative mb-8 overflow-hidden rounded-3xl border border-violet-400/15 bg-gradient-to-br from-violet-950/80 via-[#171329] to-[#10101a] p-6 sm:p-9">
-          <div className="pointer-events-none absolute -right-16 -top-24 h-72 w-72 rounded-full bg-violet-600/20 blur-3xl" />
+        <section className="relative mb-8 overflow-hidden rounded-3xl border border-orange-400/25 bg-gradient-to-br from-[#9a3412] via-[#6b2b0d] to-[#211008] p-6 shadow-2xl shadow-orange-950/30 sm:p-9">
+          <div className="pointer-events-none absolute -right-16 -top-24 h-72 w-72 rounded-full bg-orange-400/30 blur-3xl" />
+          <div className="pointer-events-none absolute -bottom-32 left-1/3 h-64 w-64 rounded-full bg-amber-400/20 blur-3xl" />
+
+          <div className="pointer-events-none absolute inset-0 opacity-[0.12]">
+            <div className="absolute -right-10 top-[-100px] h-80 w-80 rotate-45 border border-white/70" />
+            <div className="absolute right-32 top-[-120px] h-80 w-80 rotate-45 border border-white/60" />
+            <div className="absolute bottom-[-180px] left-1/3 h-80 w-80 rotate-45 border border-white/60" />
+          </div>
 
           <div className="relative flex flex-col justify-between gap-7 sm:flex-row sm:items-center">
             <div className="max-w-2xl">
-              <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-violet-400/20 bg-violet-400/10 px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.2em] text-violet-200 sm:text-xs">
+              <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-orange-200/30 bg-black/20 px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.2em] text-orange-100 sm:text-xs">
                 <Sparkles size={14} />
                 Your personal collection
               </div>
 
-              <h1 className="text-4xl font-black tracking-tight sm:text-5xl">
+              <h1 className="text-4xl font-black tracking-tight sm:text-5xl lg:text-6xl">
                 My{' '}
-                <span className="bg-gradient-to-r from-violet-300 to-fuchsia-400 bg-clip-text text-transparent">
+                <span className="bg-gradient-to-r from-orange-200 via-amber-200 to-yellow-100 bg-clip-text text-transparent">
                   Vault.
                 </span>
               </h1>
 
-              <p className="mt-4 max-w-lg text-sm leading-6 text-gray-400 sm:text-base">
+              <p className="mt-4 max-w-lg text-sm leading-6 text-orange-50/80 sm:text-base">
                 Your anime collection, saved Shorts, playlists and creator
                 workspace, all in one place.
               </p>
@@ -936,7 +1103,7 @@ export default function MyVault() {
               <div className="mt-6 flex flex-wrap gap-3">
                 <Link
                   to="/explore"
-                  className="inline-flex items-center gap-2 rounded-xl bg-violet-600 px-5 py-3 text-sm font-bold text-white hover:bg-violet-500"
+                  className="inline-flex items-center gap-2 rounded-xl bg-orange-400 px-5 py-3 text-sm font-bold text-[#261106] shadow-lg transition hover:bg-orange-300"
                 >
                   <Compass size={16} />
                   Explore anime
@@ -945,7 +1112,7 @@ export default function MyVault() {
 
                 <Link
                   to="/upload"
-                  className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-5 py-3 text-sm font-semibold text-gray-200 hover:bg-white/[0.08]"
+                  className="inline-flex items-center gap-2 rounded-xl border border-white/20 bg-black/20 px-5 py-3 text-sm font-semibold text-white transition hover:bg-black/30"
                 >
                   <Upload size={16} />
                   Upload a Short
@@ -953,32 +1120,54 @@ export default function MyVault() {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-3 sm:w-64">
-              <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
-                <Bookmark size={19} className="text-violet-300" />
-                <p className="mt-4 text-3xl font-black">{savedAnime.length}</p>
-                <p className="mt-1 text-xs text-gray-400">Saved trailers</p>
+            <div className="grid grid-cols-2 gap-3 sm:w-72">
+              <div className="rounded-2xl border border-white/15 bg-black/25 p-4 backdrop-blur-sm">
+                <Bookmark size={19} className="text-orange-200" />
+                <p className="mt-4 text-3xl font-black tabular-nums">
+                  {savedShortsCount}
+                </p>
+                <p className="mt-1 text-xs text-orange-100/70">
+                  Saved Shorts
+                </p>
               </div>
 
-              <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
-                <Video size={19} className="text-pink-300" />
-                <p className="mt-4 text-3xl font-black">{myShorts.length}</p>
-                <p className="mt-1 text-xs text-gray-400">Your Shorts</p>
+              <div className="rounded-2xl border border-white/15 bg-black/25 p-4 backdrop-blur-sm">
+                <Video size={19} className="text-amber-200" />
+                <p className="mt-4 text-3xl font-black tabular-nums">
+                  {myShorts.length}
+                </p>
+                <p className="mt-1 text-xs text-orange-100/70">
+                  Your Shorts
+                </p>
+              </div>
+
+              <div className="col-span-2 rounded-2xl border border-white/15 bg-black/25 p-4 backdrop-blur-sm">
+                <div className="flex items-center gap-3">
+                  <Library size={19} className="text-orange-200" />
+                  <div>
+                    <p className="text-2xl font-black tabular-nums">
+                      {savedAnime.length}
+                    </p>
+                    <p className="text-xs text-orange-100/70">
+                      Saved Anime
+                    </p>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
         </section>
 
         {!user ? (
-          <section className="rounded-3xl border border-white/[0.07] bg-[#11111b] px-5 py-16 text-center">
-            <ShieldCheck size={30} className="mx-auto text-violet-300" />
+          <section className="rounded-3xl border border-orange-500/10 bg-[#17100b] px-5 py-16 text-center">
+            <ShieldCheck size={30} className="mx-auto text-orange-300" />
             <h2 className="mt-5 text-2xl font-black">Your vault is waiting</h2>
             <p className="mt-3 text-sm text-gray-400">
               Sign in to save anime, build playlists and manage your Shorts.
             </p>
             <Link
               to="/login"
-              className="mt-6 inline-flex items-center gap-2 rounded-xl bg-violet-600 px-6 py-3 text-sm font-bold hover:bg-violet-500"
+              className="mt-6 inline-flex items-center gap-2 rounded-xl bg-orange-500 px-6 py-3 text-sm font-bold hover:bg-orange-400"
             >
               Sign in to continue
               <ArrowRight size={16} />
@@ -988,7 +1177,7 @@ export default function MyVault() {
           <>
             <section className="mb-7">
               <div className="mb-4">
-                <div className="mb-2 flex items-center gap-2 text-xs font-bold uppercase tracking-[0.18em] text-violet-300">
+                <div className="mb-2 flex items-center gap-2 text-xs font-bold uppercase tracking-[0.18em] text-orange-300">
                   <Library size={14} />
                   Your collection
                 </div>
@@ -1000,7 +1189,7 @@ export default function MyVault() {
                 </p>
               </div>
 
-              <div className="flex flex-wrap gap-2 rounded-2xl border border-white/[0.07] bg-[#11111b] p-2">
+              <div className="flex flex-wrap gap-2 rounded-2xl border border-orange-500/10 bg-[#17100b] p-2">
                 {tabs.map((tab) => {
                   const Icon = tab.icon
                   const active = activeTab === tab.id
@@ -1019,13 +1208,14 @@ export default function MyVault() {
                       onClick={() => {
                         setActiveTab(tab.id)
                         setActivePlaylist(null)
+                        setPlaylistShorts([])
                         setSearch('')
                         setNotice('')
                       }}
                       className={`inline-flex flex-1 items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-bold transition sm:flex-none ${
                         active
-                          ? 'bg-violet-600 text-white shadow-lg shadow-violet-950/30'
-                          : 'text-gray-400 hover:bg-white/[0.05] hover:text-white'
+                          ? 'bg-orange-500 text-white shadow-lg shadow-orange-950/30'
+                          : 'text-gray-400 hover:bg-orange-500/10 hover:text-white'
                       }`}
                     >
                       <Icon size={17} />
@@ -1042,7 +1232,7 @@ export default function MyVault() {
                   onClick={refreshAll}
                   disabled={loading || shortsLoading}
                   title="Refresh vault"
-                  className="ml-auto flex h-11 w-11 items-center justify-center rounded-xl border border-white/[0.08] text-gray-300 hover:border-violet-400/30 hover:text-violet-300 disabled:opacity-50"
+                  className="ml-auto flex h-11 w-11 items-center justify-center rounded-xl border border-orange-500/10 text-gray-300 hover:border-orange-400/30 hover:text-orange-300 disabled:opacity-50"
                 >
                   <RefreshCw
                     size={16}
@@ -1079,7 +1269,7 @@ export default function MyVault() {
               <section>
                 <div className="mb-5 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
                   <div>
-                    <h2 className="text-2xl font-black">Saved Trailers</h2>
+                    <h2 className="text-2xl font-black">Saved Anime</h2>
                     <p className="mt-2 text-sm text-gray-500">
                       Anime you have bookmarked for later.
                     </p>
@@ -1095,7 +1285,7 @@ export default function MyVault() {
                       value={search}
                       onChange={(event) => setSearch(event.target.value)}
                       placeholder="Search saved anime..."
-                      className="w-full rounded-xl border border-white/[0.08] bg-[#11111b] py-3 pl-11 pr-4 text-sm text-white outline-none placeholder:text-gray-600 focus:border-violet-400/40"
+                      className="w-full rounded-xl border border-orange-500/10 bg-[#17100b] py-3 pl-11 pr-4 text-sm text-white outline-none placeholder:text-gray-600 focus:border-orange-400/40"
                     />
                   </div>
                 </div>
@@ -1121,7 +1311,7 @@ export default function MyVault() {
                   <SectionEmpty
                     icon={Bookmark}
                     title={
-                      search ? 'No matching anime' : 'No saved trailers yet'
+                      search ? 'No matching anime' : 'No saved anime yet'
                     }
                     description={
                       search
@@ -1131,7 +1321,7 @@ export default function MyVault() {
                     action={
                       <Link
                         to="/explore"
-                        className="mt-5 inline-flex items-center gap-2 rounded-xl bg-violet-600 px-5 py-3 text-sm font-bold text-white hover:bg-violet-500"
+                        className="mt-5 inline-flex items-center gap-2 rounded-xl bg-orange-500 px-5 py-3 text-sm font-bold text-white hover:bg-orange-400"
                       >
                         <Compass size={16} />
                         Explore anime
@@ -1154,7 +1344,7 @@ export default function MyVault() {
 
                   <Link
                     to="/upload"
-                    className="inline-flex items-center justify-center gap-2 self-start rounded-xl bg-violet-600 px-4 py-3 text-sm font-bold hover:bg-violet-500"
+                    className="inline-flex items-center justify-center gap-2 self-start rounded-xl bg-orange-500 px-4 py-3 text-sm font-bold hover:bg-orange-400"
                   >
                     <Upload size={16} />
                     Create Short
@@ -1166,7 +1356,7 @@ export default function MyVault() {
                     {Array.from({ length: 3 }, (_, index) => (
                       <div
                         key={index}
-                        className="aspect-video animate-pulse rounded-2xl bg-white/[0.05]"
+                        className="aspect-video animate-pulse rounded-2xl bg-orange-500/[0.05]"
                       />
                     ))}
                   </div>
@@ -1174,7 +1364,7 @@ export default function MyVault() {
                   <>
                     <div>
                       <div className="mb-4 flex items-center gap-2">
-                        <Video size={17} className="text-violet-300" />
+                        <Video size={17} className="text-orange-300" />
                         <h3 className="text-lg font-bold">
                           Unpublished drafts
                         </h3>
@@ -1219,7 +1409,7 @@ export default function MyVault() {
                           action={
                             <Link
                               to="/upload"
-                              className="mt-5 inline-flex items-center gap-2 rounded-xl bg-violet-600 px-5 py-3 text-sm font-bold hover:bg-violet-500"
+                              className="mt-5 inline-flex items-center gap-2 rounded-xl bg-orange-500 px-5 py-3 text-sm font-bold hover:bg-orange-400"
                             >
                               <Upload size={16} />
                               Upload a Short
@@ -1231,10 +1421,7 @@ export default function MyVault() {
 
                     <div className="mt-10">
                       <div className="mb-4 flex items-center gap-2">
-                        <CalendarClock
-                          size={17}
-                          className="text-amber-300"
-                        />
+                        <CalendarClock size={17} className="text-amber-300" />
                         <h3 className="text-lg font-bold">
                           Scheduled Shorts
                         </h3>
@@ -1284,7 +1471,7 @@ export default function MyVault() {
                     <p className="mt-6 flex items-start gap-2 text-xs leading-5 text-gray-500">
                       <Calendar
                         size={14}
-                        className="mt-0.5 shrink-0 text-violet-300"
+                        className="mt-0.5 shrink-0 text-orange-300"
                       />
                       Scheduling saves your publication time. Automatic
                       publishing still requires the Supabase server-side
@@ -1310,7 +1497,7 @@ export default function MyVault() {
                     onClick={() =>
                       setShowCreatePlaylist((current) => !current)
                     }
-                    className="inline-flex items-center justify-center gap-2 self-start rounded-xl bg-violet-600 px-4 py-3 text-sm font-bold hover:bg-violet-500"
+                    className="inline-flex items-center justify-center gap-2 self-start rounded-xl bg-orange-500 px-4 py-3 text-sm font-bold hover:bg-orange-400"
                   >
                     <FolderPlus size={17} />
                     Create playlist
@@ -1320,7 +1507,7 @@ export default function MyVault() {
                 {showCreatePlaylist && (
                   <form
                     onSubmit={handleCreatePlaylist}
-                    className="mb-6 max-w-xl rounded-2xl border border-violet-400/20 bg-[#11111b] p-5"
+                    className="mb-6 max-w-xl rounded-2xl border border-orange-400/20 bg-[#17100b] p-5"
                   >
                     <div className="mb-4 flex items-center justify-between">
                       <h3 className="font-bold">New playlist</h3>
@@ -1344,7 +1531,7 @@ export default function MyVault() {
                       maxLength={60}
                       required
                       placeholder="e.g. Anime edits"
-                      className="w-full rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none focus:border-violet-400/50"
+                      className="w-full rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none focus:border-orange-400/50"
                     />
 
                     <label className="mb-2 mt-4 block text-xs font-semibold text-gray-300">
@@ -1358,13 +1545,13 @@ export default function MyVault() {
                       maxLength={200}
                       rows={3}
                       placeholder="What is this playlist about?"
-                      className="w-full resize-none rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none focus:border-violet-400/50"
+                      className="w-full resize-none rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-sm text-white outline-none focus:border-orange-400/50"
                     />
 
                     <button
                       type="submit"
                       disabled={creatingPlaylist || !playlistName.trim()}
-                      className="mt-4 inline-flex items-center gap-2 rounded-xl bg-violet-600 px-5 py-3 text-sm font-bold hover:bg-violet-500 disabled:opacity-50"
+                      className="mt-4 inline-flex items-center gap-2 rounded-xl bg-orange-500 px-5 py-3 text-sm font-bold hover:bg-orange-400 disabled:opacity-50"
                     >
                       {creatingPlaylist ? (
                         <RefreshCw size={15} className="animate-spin" />
@@ -1381,7 +1568,7 @@ export default function MyVault() {
                     {Array.from({ length: 3 }, (_, index) => (
                       <div
                         key={index}
-                        className="h-36 animate-pulse rounded-2xl bg-white/[0.05]"
+                        className="h-36 animate-pulse rounded-2xl bg-orange-500/[0.05]"
                       />
                     ))}
                   </div>
@@ -1401,7 +1588,10 @@ export default function MyVault() {
                           playlist.short_count ??
                           playlist.shorts_count ??
                           playlist.video_count ??
-                          playlist.count
+                          playlist.count ??
+                          playlistSavedShorts.filter(
+                            (item) => item.__playlistId === playlist.id,
+                          ).length
 
                         return (
                           <button
@@ -1410,12 +1600,12 @@ export default function MyVault() {
                             onClick={() => loadPlaylistShorts(playlist)}
                             className={`rounded-2xl border p-5 text-left transition ${
                               activePlaylist?.id === playlist.id
-                                ? 'border-violet-400/40 bg-violet-500/10'
-                                : 'border-white/[0.08] bg-[#11111b] hover:border-violet-400/30'
+                                ? 'border-orange-400/40 bg-orange-500/10'
+                                : 'border-orange-500/10 bg-[#17100b] hover:border-orange-400/30'
                             }`}
                           >
                             <div className="flex items-center justify-between">
-                              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-violet-500/10 text-violet-300">
+                              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-orange-500/10 text-orange-300">
                                 <ListVideo size={23} />
                               </div>
                               <ArrowRight
@@ -1433,12 +1623,10 @@ export default function MyVault() {
                                 'Your saved Shorts playlist'}
                             </p>
 
-                            {shortCount != null && (
-                              <p className="mt-3 text-xs font-semibold text-violet-300">
-                                {shortCount}{' '}
-                                {Number(shortCount) === 1 ? 'Short' : 'Shorts'}
-                              </p>
-                            )}
+                            <p className="mt-3 text-xs font-semibold text-orange-300">
+                              {shortCount}{' '}
+                              {Number(shortCount) === 1 ? 'Short' : 'Shorts'}
+                            </p>
                           </button>
                         )
                       })}
@@ -1453,7 +1641,7 @@ export default function MyVault() {
                       <button
                         type="button"
                         onClick={() => setShowCreatePlaylist(true)}
-                        className="mt-5 inline-flex items-center gap-2 rounded-xl bg-violet-600 px-5 py-3 text-sm font-bold hover:bg-violet-500"
+                        className="mt-5 inline-flex items-center gap-2 rounded-xl bg-orange-500 px-5 py-3 text-sm font-bold hover:bg-orange-400"
                       >
                         <FolderPlus size={16} />
                         Create your first playlist
@@ -1463,10 +1651,10 @@ export default function MyVault() {
                 )}
 
                 {activePlaylist && (
-                  <div className="mt-10 border-t border-white/[0.07] pt-8">
+                  <div className="mt-10 border-t border-orange-500/10 pt-8">
                     <div className="mb-5 flex items-center justify-between gap-3">
                       <div>
-                        <p className="text-xs font-bold uppercase tracking-wider text-violet-300">
+                        <p className="text-xs font-bold uppercase tracking-wider text-orange-300">
                           Selected playlist
                         </p>
                         <h3 className="mt-2 text-xl font-black">
@@ -1490,7 +1678,16 @@ export default function MyVault() {
                       </button>
                     </div>
 
-                    {playlistShorts.length ? (
+                    {playlistShortsLoading ? (
+                      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                        {Array.from({ length: 3 }, (_, index) => (
+                          <div
+                            key={index}
+                            className="aspect-video animate-pulse rounded-2xl bg-orange-500/[0.05]"
+                          />
+                        ))}
+                      </div>
+                    ) : playlistShorts.length ? (
                       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
                         {playlistShorts.map((item, index) =>
                           renderSavedShort(item, index, true),
@@ -1506,26 +1703,35 @@ export default function MyVault() {
                   </div>
                 )}
 
-                <div className="mt-12 border-t border-white/[0.07] pt-8">
+                <div className="mt-12 border-t border-orange-500/10 pt-8">
                   <div className="mb-5">
-                    <h3 className="text-xl font-black">Saved Shorts</h3>
-                    <p className="mt-2 text-sm text-gray-500">
-                      Shorts you have saved from other creators.
-                    </p>
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <h3 className="text-xl font-black">Saved Shorts</h3>
+                        <p className="mt-2 text-sm text-gray-500">
+                          Your saved Shorts, including Shorts collected in
+                          your playlists.
+                        </p>
+                      </div>
+
+                      <span className="rounded-xl border border-orange-500/20 bg-orange-500/10 px-3 py-2 text-sm font-bold text-orange-300">
+                        {savedShortsCount} saved
+                      </span>
+                    </div>
                   </div>
 
-                  {savedShortsLoading ? (
+                  {savedShortsLoading || playlistsLoading ? (
                     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
                       {Array.from({ length: 3 }, (_, index) => (
                         <div
                           key={index}
-                          className="aspect-video animate-pulse rounded-2xl bg-white/[0.05]"
+                          className="aspect-video animate-pulse rounded-2xl bg-orange-500/[0.05]"
                         />
                       ))}
                     </div>
-                  ) : savedShorts.length ? (
+                  ) : combinedSavedShorts.length ? (
                     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                      {savedShorts.map((item, index) =>
+                      {combinedSavedShorts.map((item, index) =>
                         renderSavedShort(item, index),
                       )}
                     </div>
@@ -1533,11 +1739,11 @@ export default function MyVault() {
                     <SectionEmpty
                       icon={Bookmark}
                       title="No saved Shorts yet"
-                      description="When you save a Short from the Shorts feed, it will appear here."
+                      description="When you save a Short or add one to a playlist, it will appear here."
                       action={
                         <Link
                           to="/shorts"
-                          className="mt-5 inline-flex items-center gap-2 rounded-xl bg-violet-600 px-5 py-3 text-sm font-bold hover:bg-violet-500"
+                          className="mt-5 inline-flex items-center gap-2 rounded-xl bg-orange-500 px-5 py-3 text-sm font-bold hover:bg-orange-400"
                         >
                           <Play size={16} />
                           Explore Shorts
@@ -1554,7 +1760,7 @@ export default function MyVault() {
         <section className="mt-14">
           <div className="mb-5 flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
             <div>
-              <div className="mb-2 flex items-center gap-2 text-xs font-bold uppercase tracking-[0.18em] text-violet-300">
+              <div className="mb-2 flex items-center gap-2 text-xs font-bold uppercase tracking-[0.18em] text-orange-300">
                 <Sparkles size={14} />
                 Handpicked for discovery
               </div>
@@ -1568,7 +1774,7 @@ export default function MyVault() {
 
             <Link
               to="/explore"
-              className="inline-flex items-center gap-2 self-start text-sm font-semibold text-violet-300 hover:text-violet-200 sm:self-auto"
+              className="inline-flex items-center gap-2 self-start text-sm font-semibold text-orange-300 hover:text-orange-200 sm:self-auto"
             >
               Explore all
               <ArrowRight size={16} />
@@ -1584,11 +1790,14 @@ export default function MyVault() {
           ) : suggestions.length ? (
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
               {suggestions.map((anime) => (
-                <RecommendationCard key={anime.id} anime={anime} />
+                <RecommendationCard
+                  key={anime.mal_id || anime.id}
+                  anime={anime}
+                />
               ))}
             </div>
           ) : (
-            <div className="rounded-2xl border border-white/[0.07] bg-[#11111b] p-6 text-center">
+            <div className="rounded-2xl border border-orange-500/10 bg-[#17100b] p-6 text-center">
               <p className="text-sm text-gray-400">
                 Recommendations are temporarily unavailable.
               </p>
@@ -1596,9 +1805,9 @@ export default function MyVault() {
           )}
         </section>
 
-        <footer className="mt-12 flex flex-col items-center justify-between gap-3 border-t border-white/[0.06] pt-6 text-center text-xs text-gray-600 sm:flex-row sm:text-left">
+        <footer className="mt-12 flex flex-col items-center justify-between gap-3 border-t border-orange-500/10 pt-6 text-center text-xs text-gray-600 sm:flex-row sm:text-left">
           <span className="inline-flex items-center gap-2">
-            <Sparkles size={14} className="text-violet-400" />
+            <Sparkles size={14} className="text-orange-400" />
             Anime Vault · Your anime, your universe.
           </span>
           <span>Keep discovering. Keep collecting.</span>
@@ -1610,13 +1819,17 @@ export default function MyVault() {
           <section
             role="dialog"
             aria-modal="true"
-            className="w-full max-w-md rounded-3xl border border-white/10 bg-[#14141f] p-6 shadow-2xl"
+            aria-labelledby="remove-anime-title"
+            className="w-full max-w-md rounded-3xl border border-orange-500/10 bg-[#17100b] p-6 shadow-2xl"
           >
             <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-red-500/10 text-red-400">
               <Trash2 size={22} />
             </div>
 
-            <h2 className="mt-5 text-xl font-bold">
+            <h2
+              id="remove-anime-title"
+              className="mt-5 text-xl font-bold"
+            >
               Remove from your vault?
             </h2>
 

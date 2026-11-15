@@ -115,12 +115,26 @@ export default function Shorts() {
   const viewRecordedRef = useRef(new Set())
   const touchStartYRef = useRef(null)
   const activeIndexRef = useRef(0)
+  const navigationTargetRef = useRef(null)
+  const navigationTimeoutRef = useRef(null)
+  const likeRequestsRef = useRef(new Set())
+  const saveRequestsRef = useRef(new Set())
+  const loadingMoreRef = useRef(false)
+  const commentsRequestRef = useRef(0)
 
   const activeShort = shorts[activeIndex]
 
   useEffect(() => {
     activeIndexRef.current = activeIndex
   }, [activeIndex])
+
+  useEffect(() => {
+    return () => {
+      if (navigationTimeoutRef.current) {
+        window.clearTimeout(navigationTimeoutRef.current)
+      }
+    }
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -137,10 +151,7 @@ export default function Shorts() {
         if (cancelled) return
 
         if (!result?.success) {
-          console.error(
-            'Unable to load saved Shorts:',
-            result?.error,
-          )
+          console.error('Unable to load saved Shorts:', result?.error)
           return
         }
 
@@ -172,6 +183,11 @@ export default function Shorts() {
     async function loadInitialShorts() {
       try {
         setActionError('')
+        activeIndexRef.current = 0
+        navigationTargetRef.current = null
+        setActiveIndex(0)
+        setHasMore(true)
+        viewRecordedRef.current.clear()
 
         const result = await fetchShorts({
           limit: PAGE_SIZE,
@@ -190,8 +206,6 @@ export default function Shorts() {
             shorts: shuffleForThisVisit(received),
           })
         }
-
-        setActiveIndex(0)
       } catch (err) {
         if (!cancelled) {
           setActionError(
@@ -217,15 +231,18 @@ export default function Shorts() {
   }, [user?.id, shorts, checkLiked])
 
   const loadMoreShorts = useCallback(async () => {
-    if (loadingMore || !hasMore) return
+    if (loadingMoreRef.current || !hasMore) return
 
+    loadingMoreRef.current = true
     setLoadingMore(true)
     setActionError('')
 
     try {
+      const currentShorts = useShortStore.getState().shorts
+
       const result = await fetchShorts({
         limit: PAGE_SIZE,
-        offset: shorts.length,
+        offset: currentShorts.length,
         append: true,
       })
 
@@ -262,9 +279,10 @@ export default function Shorts() {
         err?.message || 'Unable to load more Shorts.',
       )
     } finally {
+      loadingMoreRef.current = false
       setLoadingMore(false)
     }
-  }, [loadingMore, hasMore, fetchShorts, shorts.length])
+  }, [hasMore, fetchShorts])
 
   const goToShort = useCallback((index) => {
     const currentShorts = useShortStore.getState().shorts
@@ -276,16 +294,28 @@ export default function Shorts() {
       Math.min(index, currentShorts.length - 1),
     )
 
+    const target = cardRefs.current.get(safeIndex)
+
+    if (!target) return
+
+    if (navigationTimeoutRef.current) {
+      window.clearTimeout(navigationTimeoutRef.current)
+    }
+
+    activeIndexRef.current = safeIndex
+    navigationTargetRef.current = safeIndex
     setActiveIndex(safeIndex)
 
-    const element = cardRefs.current.get(safeIndex)
+    target.scrollIntoView({
+      behavior: 'smooth',
+      block: 'start',
+    })
 
-    if (element) {
-      element.scrollIntoView({
-        behavior: 'smooth',
-        block: 'start',
-      })
-    }
+    navigationTimeoutRef.current = window.setTimeout(() => {
+      if (navigationTargetRef.current === safeIndex) {
+        navigationTargetRef.current = null
+      }
+    }, 1800)
   }, [])
 
   const goNext = useCallback(() => {
@@ -297,10 +327,10 @@ export default function Shorts() {
       return
     }
 
-    if (hasMore && !loadingMore) {
+    if (hasMore && !loadingMoreRef.current) {
       loadMoreShorts()
     }
-  }, [goToShort, hasMore, loadingMore, loadMoreShorts])
+  }, [goToShort, hasMore, loadMoreShorts])
 
   const goPrevious = useCallback(() => {
     const previousIndex = activeIndexRef.current - 1
@@ -315,36 +345,71 @@ export default function Shorts() {
 
     const observer = new IntersectionObserver(
       (entries) => {
-        let bestEntry = null
+        if (navigationTargetRef.current !== null) {
+          const targetIndex = navigationTargetRef.current
+          const targetEntry = entries.find(
+            (entry) =>
+              Number(entry.target.dataset.shortIndex) === targetIndex,
+          )
 
-        for (const entry of entries) {
-          if (!entry.isIntersecting) continue
+          if (targetEntry?.isIntersecting) {
+            navigationTargetRef.current = null
 
-          if (
-            !bestEntry ||
-            entry.intersectionRatio > bestEntry.intersectionRatio
-          ) {
-            bestEntry = entry
+            if (navigationTimeoutRef.current) {
+              window.clearTimeout(navigationTimeoutRef.current)
+              navigationTimeoutRef.current = null
+            }
+          } else {
+            return
           }
         }
 
-        if (!bestEntry) return
+        let bestIndex = -1
+        let bestRatio = 0
 
-        const index = Number(
-          bestEntry.target.dataset.shortIndex,
-        )
+        cardRefs.current.forEach((element, index) => {
+          if (!element) return
+
+          const rect = element.getBoundingClientRect()
+          const visibleTop = Math.max(rect.top, 0)
+          const visibleBottom = Math.min(
+            rect.bottom,
+            window.innerHeight,
+          )
+
+          const visibleHeight = Math.max(
+            0,
+            visibleBottom - visibleTop,
+          )
+
+          const denominator = Math.min(
+            rect.height,
+            window.innerHeight,
+          )
+
+          const ratio = denominator > 0
+            ? visibleHeight / denominator
+            : 0
+
+          if (ratio > bestRatio) {
+            bestRatio = ratio
+            bestIndex = index
+          }
+        })
 
         if (
-          Number.isInteger(index) &&
-          index !== activeIndexRef.current
+          bestIndex >= 0 &&
+          bestRatio > 0.15 &&
+          bestIndex !== activeIndexRef.current
         ) {
-          setActiveIndex(index)
+          activeIndexRef.current = bestIndex
+          setActiveIndex(bestIndex)
         }
       },
       {
         root: null,
-        rootMargin: '-20% 0px -20% 0px',
-        threshold: [0.2, 0.4, 0.6, 0.8],
+        rootMargin: '0px',
+        threshold: [0.1, 0.25, 0.5, 0.75],
       },
     )
 
@@ -358,12 +423,16 @@ export default function Shorts() {
   useEffect(() => {
     if (!activeShort?.id) return
 
-    if (viewRecordedRef.current.has(activeShort.id)) return
+    const id = String(activeShort.id)
 
-    viewRecordedRef.current.add(activeShort.id)
-    rememberSeenShort(activeShort.id)
+    if (viewRecordedRef.current.has(id)) return
 
-    recordView(activeShort.id)
+    viewRecordedRef.current.add(id)
+    rememberSeenShort(id)
+
+    Promise.resolve(recordView(activeShort.id)).catch((err) => {
+      console.error('Unable to record Short view:', err)
+    })
   }, [activeShort?.id, recordView])
 
   const handleLike = useCallback(async (shortId) => {
@@ -374,13 +443,19 @@ export default function Shorts() {
       return
     }
 
-    if (busyLikeIds.includes(shortId)) return
+    const id = String(shortId)
 
-    setBusyLikeIds((previous) => [...previous, shortId])
+    if (likeRequestsRef.current.has(id)) return
+
+    likeRequestsRef.current.add(id)
+    setBusyLikeIds((previous) => [...previous, id])
     setActionError('')
 
     try {
-      const alreadyLiked = likedShortIds.includes(shortId)
+      const alreadyLiked = useShortStore
+        .getState()
+        .likedShortIds
+        .some((item) => String(item) === id)
 
       const result = alreadyLiked
         ? await unlikeShort(shortId)
@@ -396,17 +471,13 @@ export default function Shorts() {
         err?.message || 'Unable to update your like.',
       )
     } finally {
+      likeRequestsRef.current.delete(id)
+
       setBusyLikeIds((previous) =>
-        previous.filter((id) => id !== shortId),
+        previous.filter((item) => item !== id),
       )
     }
-  }, [
-    user?.id,
-    busyLikeIds,
-    likedShortIds,
-    likeShort,
-    unlikeShort,
-  ])
+  }, [user?.id, likeShort, unlikeShort])
 
   const handleSave = useCallback(async (shortId) => {
     if (!shortId) return
@@ -416,14 +487,17 @@ export default function Shorts() {
       return
     }
 
-    if (savedShortIds.includes(String(shortId))) {
+    const id = String(shortId)
+
+    if (savedShortIds.includes(id)) {
       setActionError('This Short is already saved in your My Vault.')
       return
     }
 
-    if (busySaveIds.includes(shortId)) return
+    if (saveRequestsRef.current.has(id)) return
 
-    setBusySaveIds((previous) => [...previous, shortId])
+    saveRequestsRef.current.add(id)
+    setBusySaveIds((previous) => [...previous, id])
     setActionError('')
 
     try {
@@ -436,10 +510,9 @@ export default function Shorts() {
         return
       }
 
-      setSavedShortIds((previous) => [
-        ...previous,
-        String(shortId),
-      ])
+      setSavedShortIds((previous) =>
+        previous.includes(id) ? previous : [...previous, id],
+      )
 
       setActionError(
         result?.message || 'Short saved to My Vault.',
@@ -449,28 +522,37 @@ export default function Shorts() {
         err?.message || 'Unable to save this Short.',
       )
     } finally {
+      saveRequestsRef.current.delete(id)
+
       setBusySaveIds((previous) =>
-        previous.filter((id) => id !== shortId),
+        previous.filter((item) => item !== id),
       )
     }
-  }, [user?.id, savedShortIds, busySaveIds])
+  }, [user?.id, savedShortIds])
 
   const openComments = useCallback(async (shortId) => {
     if (!shortId) return
+
+    const requestId = ++commentsRequestRef.current
 
     setCommentsShortId(shortId)
     setActionError('')
 
     try {
       await fetchComments(shortId)
+
+      if (requestId !== commentsRequestRef.current) return
     } catch (err) {
-      setActionError(
-        err?.message || 'Unable to load comments.',
-      )
+      if (requestId === commentsRequestRef.current) {
+        setActionError(
+          err?.message || 'Unable to load comments.',
+        )
+      }
     }
   }, [fetchComments])
 
   const closeComments = useCallback(() => {
+    commentsRequestRef.current += 1
     setCommentsShortId(null)
   }, [])
 
@@ -543,14 +625,10 @@ export default function Shorts() {
           <span className="shorts-brand-icon">
             <Clapperboard size={22} />
           </span>
-
           <span>Anime Vault</span>
         </Link>
 
-        <Link
-          to="/upload"
-          className="shorts-create-button"
-        >
+        <Link to="/upload" className="shorts-create-button">
           <Upload size={16} />
           Create
         </Link>
@@ -559,33 +637,26 @@ export default function Shorts() {
       <section className="shorts-feed-section">
         {isInitialLoading ? (
           <div className="shorts-state">
-            <LoaderCircle
-              className="shorts-spinner"
-              size={38}
-            />
-
+            <LoaderCircle className="shorts-spinner" size={38} />
             <h2>Loading Anime Shorts</h2>
-
             <p>Finding something good to watch...</p>
           </div>
         ) : (error || actionError) && shorts.length === 0 ? (
           <div className="shorts-state">
             <Clapperboard size={38} />
-
             <h2>Could not load Shorts</h2>
-
             <p>{actionError || error}</p>
 
             <button
               type="button"
               className="shorts-primary-button"
-              onClick={() =>
+              onClick={() => {
                 fetchShorts({
                   limit: PAGE_SIZE,
                   offset: 0,
                   append: false,
                 })
-              }
+              }}
             >
               <RefreshCw size={17} />
               Try again
@@ -594,17 +665,12 @@ export default function Shorts() {
         ) : shorts.length === 0 ? (
           <div className="shorts-state">
             <Clapperboard size={42} />
-
             <h2>No published Shorts yet</h2>
-
             <p>
               Be the first to share an anime moment with the community.
             </p>
 
-            <Link
-              to="/upload"
-              className="shorts-primary-button"
-            >
+            <Link to="/upload" className="shorts-primary-button">
               <Upload size={17} />
               Create a Short
             </Link>
@@ -618,13 +684,17 @@ export default function Shorts() {
             >
               {shorts.map((short, index) => {
                 const shortId = short.id
-                const isLiked = likedShortIds.includes(shortId)
-                const isBusy = busyLikeIds.includes(shortId)
-                const isSaved = savedShortIds.includes(String(shortId))
-                const isSaving = busySaveIds.includes(shortId)
+                const id = String(shortId)
+
+                const isLiked = likedShortIds.some(
+                  (item) => String(item) === id,
+                )
+
+                const isBusy = busyLikeIds.includes(id)
+                const isSaved = savedShortIds.includes(id)
+                const isSaving = busySaveIds.includes(id)
                 const isActive = index === activeIndex
-                const isCommentOpen =
-                  commentsShortId === shortId
+                const isCommentOpen = commentsShortId === shortId
 
                 return (
                   <article
@@ -662,10 +732,18 @@ export default function Shorts() {
                           onNext={goNext}
                           onPrevious={goPrevious}
                           onView={() => {
-                            if (!viewRecordedRef.current.has(shortId)) {
-                              viewRecordedRef.current.add(shortId)
-                              rememberSeenShort(shortId)
-                              recordView(shortId)
+                            if (!viewRecordedRef.current.has(id)) {
+                              viewRecordedRef.current.add(id)
+                              rememberSeenShort(id)
+
+                              Promise.resolve(recordView(shortId)).catch(
+                                (err) => {
+                                  console.error(
+                                    'Unable to record Short view:',
+                                    err,
+                                  )
+                                },
+                              )
                             }
                           }}
                           onToggleMute={() =>
@@ -682,7 +760,6 @@ export default function Shorts() {
                             <span className="shorts-eyebrow">
                               COMMUNITY
                             </span>
-
                             <h3>Comments</h3>
                           </div>
 
@@ -697,7 +774,7 @@ export default function Shorts() {
 
                         <CommentSection
                           shortId={shortId}
-                          short={short}
+                          onClose={closeComments}
                         />
                       </div>
                     )}
@@ -707,11 +784,7 @@ export default function Shorts() {
 
               {loadingMore && (
                 <div className="shorts-load-more">
-                  <LoaderCircle
-                    className="shorts-spinner"
-                    size={25}
-                  />
-
+                  <LoaderCircle className="shorts-spinner" size={25} />
                   <span>Finding more Shorts...</span>
                 </div>
               )}
@@ -719,9 +792,7 @@ export default function Shorts() {
               {!hasMore && shorts.length > 0 && (
                 <div className="shorts-end-message">
                   <Sparkles size={24} />
-
                   <h3>You're all caught up!</h3>
-
                   <p>
                     You've reached the end of the current Shorts feed.
                   </p>
@@ -735,6 +806,8 @@ export default function Shorts() {
                         shorts: freshOrder,
                       })
 
+                      activeIndexRef.current = 0
+                      navigationTargetRef.current = 0
                       setActiveIndex(0)
 
                       requestAnimationFrame(() => {
@@ -776,17 +849,14 @@ export default function Shorts() {
 
 const styles = `
 .shorts-page {
-  --accent: #a855f7;
-  --accent-light: #c084fc;
-  --background: #08080e;
-  --panel: #14141d;
-  --text: #f5f3ff;
-  --muted: #a1a1b5;
+  --accent: #ff8a00;
+  --accent-light: #ffad42;
+  --panel: #0a0a0a;
+  --text: #ffffff;
+  --muted: #a1a1aa;
 
   min-height: 100vh;
-  background:
-    radial-gradient(ellipse at 50% -15%, rgba(168,85,247,.12), transparent 45%),
-    var(--background);
+  background: #000000;
   color: var(--text);
   font-family: inherit;
 }
@@ -798,20 +868,20 @@ const styles = `
 }
 
 .shorts-header {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  z-index: 100;
+  position: relative;
+  top: auto;
+  left: auto;
+  right: auto;
+  z-index: 1;
+  width: 100%;
   min-height: 68px;
   padding: 12px clamp(16px, 4vw, 48px);
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  background: rgba(8,8,14,.91);
-  border-bottom: 1px solid rgba(255,255,255,.07);
-  backdrop-filter: blur(20px);
+  background: #000000;
+  border-bottom: 1px solid rgba(255,138,0,.16);
 }
 
 .shorts-brand {
@@ -830,8 +900,8 @@ const styles = `
   display: grid;
   place-items: center;
   border-radius: 12px;
-  background: rgba(168,85,247,.15);
-  color: var(--accent-light);
+  background: rgba(255,138,0,.1);
+  color: var(--accent);
 }
 
 .shorts-create-button,
@@ -842,10 +912,10 @@ const styles = `
   align-items: center;
   justify-content: center;
   gap: 8px;
-  border: 0;
+  border: 1px solid rgba(255,138,0,.45);
   border-radius: 11px;
-  background: var(--accent);
-  color: white;
+  background: #111111;
+  color: var(--accent-light);
   font: inherit;
   font-size: 13px;
   font-weight: 800;
@@ -856,14 +926,16 @@ const styles = `
 
 .shorts-create-button:hover,
 .shorts-primary-button:hover {
-  background: #9333ea;
+  background: rgba(255,138,0,.12);
+  border-color: var(--accent);
+  color: white;
   transform: translateY(-2px);
 }
 
 .shorts-feed-section {
   width: min(100% - 40px, 1200px);
   margin: 0 auto;
-  padding-top: 100px;
+  padding-top: 28px;
 }
 
 .shorts-layout {
@@ -888,8 +960,8 @@ const styles = `
   grid-template-columns: minmax(0, 1fr);
   align-items: center;
   gap: 22px;
-  scroll-margin-top: 88px;
-  transition: max-width 0.35s ease;
+  scroll-margin-top: 92px;
+  transition: max-width .35s ease;
 }
 
 .shorts-feed-item.has-comments {
@@ -910,7 +982,7 @@ const styles = `
   min-width: 0;
   display: flex;
   justify-content: center;
-  transition: transform 0.35s ease;
+  transition: transform .35s ease;
 }
 
 .shorts-feed-item.has-comments .shorts-video-card {
@@ -924,10 +996,10 @@ const styles = `
   overflow-y: auto;
   margin-top: 0;
   padding: 18px;
-  border: 1px solid rgba(255,255,255,.08);
+  border: 1px solid rgba(255,138,0,.2);
   border-radius: 16px;
-  background: var(--panel);
-  animation: comments-slide-in 0.3s ease;
+  background: #090909;
+  animation: comments-slide-in .3s ease;
 }
 
 .shorts-comments-header {
@@ -947,11 +1019,16 @@ const styles = `
   height: 36px;
   display: grid;
   place-items: center;
-  border: 0;
+  border: 1px solid rgba(255,138,0,.2);
   border-radius: 10px;
-  background: #292936;
+  background: #111111;
   color: white;
   cursor: pointer;
+}
+
+.shorts-comments-header button:hover {
+  background: rgba(255,138,0,.12);
+  color: var(--accent);
 }
 
 .shorts-eyebrow {
@@ -978,7 +1055,7 @@ const styles = `
 }
 
 .shorts-comments-panel::-webkit-scrollbar-thumb {
-  background: #494454;
+  background: #75400d;
   border-radius: 10px;
 }
 
@@ -991,6 +1068,10 @@ const styles = `
   justify-content: center;
   gap: 13px;
   text-align: center;
+}
+
+.shorts-state > svg {
+  color: var(--accent);
 }
 
 .shorts-state h2 {
@@ -1020,6 +1101,10 @@ const styles = `
   text-align: center;
 }
 
+.shorts-end-message > svg {
+  color: var(--accent);
+}
+
 .shorts-end-message h3 {
   margin: 0;
   color: white;
@@ -1036,17 +1121,25 @@ const styles = `
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  border: 1px solid rgba(192,132,252,.25);
+  border: 1px solid rgba(255,138,0,.4);
   border-radius: 10px;
-  background: rgba(168,85,247,.12);
+  background: #111111;
   color: var(--accent-light);
   font: inherit;
   font-size: 12px;
   font-weight: 800;
   cursor: pointer;
+  transition: .2s ease;
+}
+
+.shorts-end-message button:hover {
+  background: rgba(255,138,0,.12);
+  border-color: var(--accent);
+  color: white;
 }
 
 .shorts-spinner {
+  color: var(--accent);
   animation: shorts-spin 1s linear infinite;
 }
 
@@ -1066,11 +1159,11 @@ const styles = `
   display: flex;
   align-items: center;
   gap: 14px;
-  border: 1px solid rgba(255,255,255,.1);
+  border: 1px solid rgba(255,138,0,.4);
   border-radius: 12px;
-  background: #252332;
+  background: #090909;
   color: white;
-  box-shadow: 0 12px 40px rgba(0,0,0,.35);
+  box-shadow: 0 12px 40px rgba(0,0,0,.5);
   font-size: 13px;
 }
 
@@ -1079,7 +1172,7 @@ const styles = `
   place-items: center;
   border: 0;
   background: transparent;
-  color: white;
+  color: var(--accent-light);
   cursor: pointer;
 }
 
@@ -1095,7 +1188,7 @@ const styles = `
 
   .shorts-feed-section {
     width: calc(100% - 24px);
-    padding-top: 82px;
+    padding-top: 20px;
   }
 
   .shorts-layout {
@@ -1118,7 +1211,6 @@ const styles = `
   .shorts-video-column {
     width: 100%;
     justify-content: center;
-    transition: width 0.35s ease;
   }
 
   .shorts-video-card {
@@ -1126,9 +1218,9 @@ const styles = `
     max-width: 100%;
     justify-content: center;
     transition:
-      width 0.35s ease,
-      max-width 0.35s ease,
-      transform 0.35s ease;
+      width .35s ease,
+      max-width .35s ease,
+      transform .35s ease;
   }
 
   .shorts-feed-item.has-comments .shorts-video-column {
@@ -1147,7 +1239,7 @@ const styles = `
     margin-top: 0;
     padding: 14px;
     overflow-y: auto;
-    animation: mobile-comments-open 0.35s ease;
+    animation: mobile-comments-open .35s ease;
   }
 
   @keyframes mobile-comments-open {

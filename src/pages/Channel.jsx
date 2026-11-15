@@ -4,7 +4,6 @@ import { Link, useParams } from 'react-router-dom'
 import {
   UserRound,
   Play,
-  Film,
   Users,
   Bell,
   BellRing,
@@ -62,6 +61,39 @@ function formatDate(value) {
   })
 }
 
+function getYouTubeVideoId(url) {
+  if (!url) return null
+
+  try {
+    const parsed = new URL(url)
+    const host = parsed.hostname.replace(/^www\./, '')
+
+    if (host === 'youtu.be') {
+      return parsed.pathname.split('/').filter(Boolean)[0] || null
+    }
+
+    if (
+      host === 'youtube.com' ||
+      host === 'm.youtube.com' ||
+      host === 'music.youtube.com'
+    ) {
+      if (parsed.pathname === '/watch') {
+        return parsed.searchParams.get('v')
+      }
+
+      const parts = parsed.pathname.split('/').filter(Boolean)
+
+      if (['shorts', 'embed', 'live', 'v'].includes(parts[0])) {
+        return parts[1] || null
+      }
+    }
+
+    return null
+  } catch {
+    return null
+  }
+}
+
 function getEmbedUrl(url) {
   if (!url) return null
 
@@ -69,17 +101,10 @@ function getEmbedUrl(url) {
     const parsed = new URL(url)
     const host = parsed.hostname.replace(/^www\./, '')
 
-    if (host === 'youtube.com' || host === 'm.youtube.com') {
-      const videoId =
-        parsed.searchParams.get('v') ||
-        parsed.pathname.split('/').filter(Boolean).pop()
+    const youtubeId = getYouTubeVideoId(url)
 
-      return videoId ? `https://www.youtube.com/embed/${videoId}` : null
-    }
-
-    if (host === 'youtu.be') {
-      const videoId = parsed.pathname.split('/').filter(Boolean)[0]
-      return videoId ? `https://www.youtube.com/embed/${videoId}` : null
+    if (youtubeId) {
+      return `https://www.youtube.com/embed/${youtubeId}`
     }
 
     if (host === 'vimeo.com') {
@@ -97,6 +122,50 @@ function getEmbedUrl(url) {
   }
 }
 
+async function getShortStatistics(shortId, short) {
+  const [viewsResult, likesResult, commentsResult] = await Promise.all([
+    supabase
+      .from('short_views')
+      .select('short_id', { count: 'exact', head: true })
+      .eq('short_id', shortId),
+
+    supabase
+      .from('short_likes')
+      .select('short_id', { count: 'exact', head: true })
+      .eq('short_id', shortId),
+
+    supabase
+      .from('short_comments')
+      .select('short_id', { count: 'exact', head: true })
+      .eq('short_id', shortId),
+  ])
+
+  if (viewsResult.error) {
+    console.error('Could not load Short views:', viewsResult.error)
+  }
+
+  if (likesResult.error) {
+    console.error('Could not load Short likes:', likesResult.error)
+  }
+
+  if (commentsResult.error) {
+    console.error('Could not load Short comments:', commentsResult.error)
+  }
+
+  return {
+    ...short,
+    viewCount: viewsResult.error
+      ? Number(short.viewCount || 0)
+      : Number(viewsResult.count ?? 0),
+    likeCount: likesResult.error
+      ? Number(short.likeCount || 0)
+      : Number(likesResult.count ?? 0),
+    commentsCount: commentsResult.error
+      ? Number(short.commentsCount || 0)
+      : Number(commentsResult.count ?? 0),
+  }
+}
+
 function ChannelAvatar({
   src,
   name,
@@ -108,7 +177,7 @@ function ChannelAvatar({
 }) {
   return (
     <div className="relative h-28 w-28 shrink-0 sm:h-36 sm:w-36">
-      <div className="flex h-full w-full items-center justify-center overflow-hidden rounded-full border-[5px] border-[#100b19] bg-gradient-to-br from-orange-400 via-orange-600 to-amber-800 text-4xl font-black text-white shadow-[0_0_35px_rgba(249,115,22,0.2)] sm:text-5xl">
+      <div className="flex h-full w-full items-center justify-center overflow-hidden rounded-full border-[5px] border-[#17100b] bg-gradient-to-br from-orange-400 via-orange-600 to-amber-800 text-4xl font-black text-white shadow-[0_0_35px_rgba(249,115,22,0.25)] sm:text-5xl">
         {src ? (
           <img
             src={src}
@@ -127,7 +196,7 @@ function ChannelAvatar({
             onClick={onUploadClick}
             disabled={uploading}
             title="Change channel picture"
-            className="absolute bottom-1 right-1 flex h-10 w-10 items-center justify-center rounded-full border-[3px] border-[#100b19] bg-orange-500 text-white shadow-lg transition hover:scale-105 hover:bg-orange-400 disabled:opacity-60"
+            className="absolute bottom-1 right-1 flex h-10 w-10 items-center justify-center rounded-full border-[3px] border-[#17100b] bg-orange-500 text-white shadow-lg transition hover:scale-105 hover:bg-orange-400 disabled:opacity-60"
           >
             {uploading ? (
               <LoaderCircle size={17} className="animate-spin" />
@@ -151,8 +220,8 @@ function ChannelAvatar({
 
 function ChannelStat({ icon: Icon, label, value }) {
   return (
-    <div className="group flex items-center gap-4 rounded-2xl border border-white/[0.07] bg-white/[0.025] p-4 transition duration-300 hover:border-orange-500/30 hover:bg-orange-500/[0.05]">
-      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-orange-400/10 bg-orange-500/10 text-orange-400 transition group-hover:bg-orange-500/20">
+    <div className="group flex items-center gap-4 rounded-2xl border border-orange-500/10 bg-[#1b120b] p-4 transition duration-300 hover:border-orange-500/35 hover:bg-orange-500/[0.07]">
+      <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border border-orange-400/15 bg-orange-500/10 text-orange-400 transition group-hover:bg-orange-500/20">
         <Icon size={21} />
       </div>
 
@@ -160,15 +229,40 @@ function ChannelStat({ icon: Icon, label, value }) {
         <p className="text-xl font-black tracking-tight text-white">
           {formatCount(value)}
         </p>
-        <p className="mt-0.5 text-xs font-medium text-gray-500">{label}</p>
+        <p className="mt-0.5 text-xs font-medium text-orange-100/50">
+          {label}
+        </p>
       </div>
     </div>
   )
 }
 
 function ShortCard({ short }) {
-  const videoUrl = short.videoUrl || short.youtubeUrl
-  const thumbnail = short.thumbnailUrl
+  const [thumbnailFailed, setThumbnailFailed] = useState(false)
+
+  const videoUrl =
+    short.videoUrl ||
+    short.youtubeUrl ||
+    short.video_url ||
+    short.youtube_url ||
+    short.video ||
+    short.url
+
+  const youtubeId = getYouTubeVideoId(videoUrl)
+
+  const uploadedThumbnail =
+    short.thumbnailUrl ||
+    short.thumbnail_url ||
+    short.thumbnail ||
+    short.coverUrl ||
+    short.cover_url
+
+  const thumbnail =
+    uploadedThumbnail ||
+    (youtubeId
+      ? `https://img.youtube.com/vi/${youtubeId}/hqdefault.jpg`
+      : null)
+
   const embedUrl = getEmbedUrl(videoUrl)
 
   const isExternalSocial =
@@ -178,17 +272,20 @@ function ShortCard({ short }) {
   const isDirectVideo =
     videoUrl && /\.(mp4|webm|ogg|mov)(\?.*)?$/i.test(videoUrl)
 
+  const showThumbnail = thumbnail && !thumbnailFailed
+
   return (
-    <article className="group min-w-0 overflow-hidden rounded-2xl border border-white/[0.07] bg-[#130e1e] transition duration-300 hover:-translate-y-1 hover:border-orange-500/40 hover:shadow-[0_15px_40px_rgba(249,115,22,0.1)]">
+    <article className="group min-w-0 overflow-hidden rounded-2xl border border-orange-500/10 bg-[#1b120b] transition duration-300 hover:-translate-y-1 hover:border-orange-500/40 hover:shadow-[0_15px_40px_rgba(249,115,22,0.12)]">
       <Link
         to={`/shorts?id=${short.id}`}
-        className="relative block aspect-[9/16] max-h-[390px] overflow-hidden bg-[#09060e]"
+        className="relative block aspect-[9/16] max-h-[390px] overflow-hidden bg-[#100a05]"
       >
-        {thumbnail ? (
+        {showThumbnail ? (
           <img
             src={thumbnail}
             alt={short.title || 'Short thumbnail'}
             loading="lazy"
+            onError={() => setThumbnailFailed(true)}
             className="h-full w-full object-cover transition duration-700 group-hover:scale-105"
           />
         ) : isDirectVideo ? (
@@ -200,8 +297,11 @@ function ShortCard({ short }) {
             className="h-full w-full object-cover"
           />
         ) : (
-          <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-orange-950 via-[#241306] to-black">
-            <Clapperboard size={44} className="text-orange-400/60" />
+          <div className="flex h-full w-full flex-col items-center justify-center gap-3 bg-gradient-to-br from-orange-950 via-[#4a2109] to-black">
+            <Clapperboard size={44} className="text-orange-400/70" />
+            <span className="text-xs font-bold text-orange-100/50">
+              Preview unavailable
+            </span>
           </div>
         )}
 
@@ -231,12 +331,12 @@ function ShortCard({ short }) {
         </h3>
 
         {short.caption && (
-          <p className="mt-2 line-clamp-2 text-xs leading-5 text-gray-500">
+          <p className="mt-2 line-clamp-2 text-xs leading-5 text-orange-100/50">
             {short.caption}
           </p>
         )}
 
-        <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2 border-t border-white/[0.06] pt-3 text-[11px] text-gray-500">
+        <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2 border-t border-orange-500/10 pt-3 text-[11px] text-orange-100/50">
           <span className="flex items-center gap-1.5">
             <Eye size={13} />
             {formatCount(short.viewCount)} views
@@ -253,7 +353,7 @@ function ShortCard({ short }) {
           </span>
         </div>
 
-        <p className="mt-3 text-[11px] text-gray-600">
+        <p className="mt-3 text-[11px] text-orange-100/35">
           {formatDate(short.publishedAt || short.createdAt)}
         </p>
 
@@ -287,14 +387,14 @@ function ShortCard({ short }) {
 
 function EmptyState({ isOwner, title, description }) {
   return (
-    <div className="flex min-h-[280px] flex-col items-center justify-center rounded-3xl border border-dashed border-orange-500/20 bg-gradient-to-b from-orange-500/[0.045] to-transparent px-5 text-center">
-      <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-2xl border border-orange-400/15 bg-orange-500/10 text-orange-400 shadow-lg">
+    <div className="flex min-h-[280px] flex-col items-center justify-center rounded-3xl border border-dashed border-orange-500/25 bg-gradient-to-b from-orange-500/[0.08] to-transparent px-5 text-center">
+      <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-2xl border border-orange-400/20 bg-orange-500/10 text-orange-400 shadow-lg">
         <Clapperboard size={29} />
       </div>
 
       <h3 className="text-lg font-black text-white">{title}</h3>
 
-      <p className="mt-2 max-w-sm text-sm leading-6 text-gray-500">
+      <p className="mt-2 max-w-sm text-sm leading-6 text-orange-100/50">
         {description}
       </p>
 
@@ -343,44 +443,33 @@ export default function Channel() {
       if (result?.error) throw result.error
 
       const loadedChannel = result?.data || result
-
       const channelShorts = loadedChannel.shorts || []
 
-      const shortsWithViews = await Promise.all(
-        channelShorts.map(async (short) => {
-          const { count, error: viewsError } = await supabase
-            .from('short_views')
-            .select('short_id', { count: 'exact', head: true })
-            .eq('short_id', short.id)
-
-          if (viewsError) {
-            console.error(
-              `Could not load views for Short ${short.id}:`,
-              viewsError,
-            )
-
-            return {
-              ...short,
-              viewCount: Number(short.viewCount || 0),
-            }
-          }
-
-          return {
-            ...short,
-            viewCount: Number(count ?? 0),
-          }
-        }),
+      const shortsWithStatistics = await Promise.all(
+        channelShorts.map((short) => getShortStatistics(short.id, short)),
       )
 
-      const totalViews = shortsWithViews.reduce(
+      const totalViews = shortsWithStatistics.reduce(
         (total, short) => total + Number(short.viewCount || 0),
+        0,
+      )
+
+      const totalLikes = shortsWithStatistics.reduce(
+        (total, short) => total + Number(short.likeCount || 0),
+        0,
+      )
+
+      const totalComments = shortsWithStatistics.reduce(
+        (total, short) => total + Number(short.commentsCount || 0),
         0,
       )
 
       setChannel({
         ...loadedChannel,
-        shorts: shortsWithViews,
+        shorts: shortsWithStatistics,
         totalViews,
+        totalLikes,
+        totalComments,
       })
     } catch (err) {
       setError(getErrorMessage(err))
@@ -491,16 +580,10 @@ export default function Channel() {
     } finally {
       if (isBanner) {
         setUploadingBanner(false)
-
-        if (bannerInputRef.current) {
-          bannerInputRef.current.value = ''
-        }
+        if (bannerInputRef.current) bannerInputRef.current.value = ''
       } else {
         setUploadingAvatar(false)
-
-        if (fileInputRef.current) {
-          fileInputRef.current.value = ''
-        }
+        if (fileInputRef.current) fileInputRef.current.value = ''
       }
     }
   }
@@ -578,12 +661,12 @@ export default function Channel() {
 
   if (loading) {
     return (
-      <div className="flex min-h-[75vh] items-center justify-center bg-[#09060e]">
+      <div className="flex min-h-[75vh] items-center justify-center bg-[#100a05]">
         <div className="flex flex-col items-center gap-5">
           <div className="flex h-16 w-16 items-center justify-center rounded-2xl border border-orange-500/20 bg-orange-500/10">
             <LoaderCircle size={32} className="animate-spin text-orange-400" />
           </div>
-          <p className="text-sm font-medium text-gray-400">
+          <p className="text-sm font-medium text-orange-100/60">
             Loading channel...
           </p>
         </div>
@@ -593,7 +676,7 @@ export default function Channel() {
 
   if (error && !channel) {
     return (
-      <div className="flex min-h-[75vh] flex-col items-center justify-center bg-[#09060e] px-5 text-center">
+      <div className="flex min-h-[75vh] flex-col items-center justify-center bg-[#100a05] px-5 text-center">
         <div className="mb-5 flex h-20 w-20 items-center justify-center rounded-3xl border border-orange-500/20 bg-orange-500/10 text-orange-400">
           <UserRound size={38} />
         </div>
@@ -602,7 +685,7 @@ export default function Channel() {
           Unable to load channel
         </h2>
 
-        <p className="mt-3 max-w-md text-sm leading-6 text-gray-400">
+        <p className="mt-3 max-w-md text-sm leading-6 text-orange-100/60">
           {error}
         </p>
 
@@ -620,14 +703,14 @@ export default function Channel() {
 
   if (!channel?.profile) {
     return (
-      <div className="flex min-h-[75vh] flex-col items-center justify-center bg-[#09060e] px-5 text-center">
+      <div className="flex min-h-[75vh] flex-col items-center justify-center bg-[#100a05] px-5 text-center">
         <div className="mb-5 flex h-20 w-20 items-center justify-center rounded-3xl border border-orange-500/20 bg-orange-500/10 text-orange-400">
           <UserRound size={38} />
         </div>
 
         <h2 className="text-2xl font-black text-white">Channel not found</h2>
 
-        <p className="mt-3 text-sm text-gray-400">
+        <p className="mt-3 text-sm text-orange-100/60">
           This channel may not exist or may no longer be available.
         </p>
 
@@ -651,6 +734,7 @@ export default function Channel() {
   const totalViews = Number(channel.totalViews || 0)
   const totalLikes = Number(channel.totalLikes || 0)
   const totalComments = Number(channel.totalComments || 0)
+  const totalSubscribers = Number(channel.subscriberCount || 0)
 
   const tabs = [
     { id: 'home', label: 'Home', icon: Clapperboard },
@@ -659,11 +743,11 @@ export default function Channel() {
   ]
 
   return (
-    <main className="relative min-h-screen overflow-hidden bg-[#09060e] pb-16 text-white">
-      <div className="pointer-events-none absolute left-1/2 top-0 h-[450px] w-[850px] -translate-x-1/2 rounded-full bg-orange-600/[0.06] blur-[130px]" />
+    <main className="relative min-h-screen overflow-hidden bg-[#100a05] pb-16 text-white">
+      <div className="pointer-events-none absolute left-1/2 top-0 h-[500px] w-[900px] -translate-x-1/2 rounded-full bg-orange-600/[0.12] blur-[140px]" />
 
       <div className="relative mx-auto w-full max-w-7xl px-4 pt-6 sm:px-6 lg:px-8">
-        <section className="overflow-hidden rounded-[28px] border border-white/[0.08] bg-[#110c1b] shadow-2xl shadow-black/20">
+        <section className="overflow-hidden rounded-[28px] border border-orange-500/15 bg-[#1b120b] shadow-2xl shadow-orange-950/20">
           <div className="group/banner relative h-44 overflow-hidden sm:h-60 lg:h-72">
             {profile.bannerUrl ? (
               <img
@@ -673,12 +757,12 @@ export default function Channel() {
               />
             ) : (
               <>
-                <div className="absolute inset-0 bg-gradient-to-br from-[#4a1d08] via-[#a9430b] to-[#1c0d05]" />
+                <div className="absolute inset-0 bg-gradient-to-br from-[#7c2d12] via-[#c2410c] to-[#431407]" />
 
-                <div className="absolute -left-20 -top-32 h-80 w-80 rounded-full bg-orange-400/20 blur-[90px]" />
-                <div className="absolute -right-20 bottom-[-130px] h-96 w-96 rounded-full bg-amber-300/20 blur-[100px]" />
+                <div className="absolute -left-20 -top-32 h-80 w-80 rounded-full bg-orange-300/30 blur-[90px]" />
+                <div className="absolute -right-20 bottom-[-130px] h-96 w-96 rounded-full bg-amber-300/25 blur-[100px]" />
 
-                <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(255,255,255,0.12),transparent_30%),linear-gradient(120deg,transparent_30%,rgba(0,0,0,0.35))]" />
+                <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(255,255,255,0.15),transparent_30%),linear-gradient(120deg,transparent_30%,rgba(0,0,0,0.35))]" />
 
                 <div className="absolute inset-0 opacity-[0.13]">
                   <div className="absolute -right-10 top-[-80px] h-80 w-80 rotate-45 border border-white/40" />
@@ -688,7 +772,7 @@ export default function Channel() {
               </>
             )}
 
-            <div className="absolute inset-0 bg-black/25" />
+            <div className="absolute inset-0 bg-gradient-to-b from-black/10 via-transparent to-black/30" />
 
             {isOwner && (
               <>
@@ -696,7 +780,7 @@ export default function Channel() {
                   type="button"
                   onClick={() => bannerInputRef.current?.click()}
                   disabled={uploadingBanner}
-                  className="absolute right-4 top-4 z-10 flex items-center gap-2 rounded-xl border border-white/20 bg-black/50 px-4 py-2.5 text-xs font-bold text-white shadow-lg backdrop-blur-xl transition hover:border-orange-400/50 hover:bg-orange-500/80 disabled:cursor-not-allowed disabled:opacity-60 sm:right-6 sm:top-6"
+                  className="absolute right-4 top-4 z-10 flex items-center gap-2 rounded-xl border border-white/20 bg-black/50 px-4 py-2.5 text-xs font-bold text-white shadow-lg backdrop-blur-xl transition hover:border-orange-300/60 hover:bg-orange-500/90 disabled:cursor-not-allowed disabled:opacity-60 sm:right-6 sm:top-6"
                 >
                   {uploadingBanner ? (
                     <LoaderCircle size={15} className="animate-spin" />
@@ -728,9 +812,9 @@ export default function Channel() {
             </div>
           </div>
 
-          <div className="px-5 pb-6 sm:px-8 sm:pb-8 lg:px-10">
-            <div className="-mt-14 flex flex-col gap-5 sm:-mt-[72px] sm:flex-row sm:items-end sm:justify-between">
-              <div className="flex min-w-0 flex-col gap-4 sm:flex-row sm:items-end sm:gap-5">
+          <div className="px-5 pb-6 pt-6 sm:px-8 sm:pb-8 sm:pt-7 lg:px-10">
+            <div className="flex flex-col gap-6 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex min-w-0 flex-col gap-4 sm:flex-row sm:items-center sm:gap-5">
                 <ChannelAvatar
                   src={profile.avatarUrl}
                   name={displayName}
@@ -741,7 +825,7 @@ export default function Channel() {
                   onFileChange={handleAvatarUpload}
                 />
 
-                <div className="min-w-0 pb-1">
+                <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
                     <h1 className="max-w-full break-words text-2xl font-black tracking-tight text-white sm:text-3xl lg:text-4xl">
                       {displayName}
@@ -754,48 +838,22 @@ export default function Channel() {
                     )}
                   </div>
 
-                  <p className="mt-1.5 text-sm font-medium text-orange-300">
+                  <p className="mt-1.5 text-sm font-semibold text-orange-300">
                     @{profile.username || 'user'}
                   </p>
 
-                  <p className="mt-3 max-w-2xl text-sm leading-6 text-gray-400">
+                  <p className="mt-3 max-w-2xl text-sm leading-6 text-orange-100/60">
                     {profile.bio || 'Welcome to my Anime Vault channel.'}
                   </p>
-
-                  <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs font-medium text-gray-500">
-                    <span className="flex items-center gap-2">
-                      <Users size={15} className="text-orange-400" />
-                      <strong className="text-gray-300">
-                        {formatCount(channel.subscriberCount)}
-                      </strong>
-                      subscribers
-                    </span>
-
-                    <span className="flex items-center gap-2">
-                      <Video size={15} className="text-orange-400" />
-                      <strong className="text-gray-300">
-                        {formatCount(channel.shortsCount ?? shorts.length)}
-                      </strong>
-                      Shorts
-                    </span>
-
-                    <span className="flex items-center gap-2">
-                      <Eye size={15} className="text-orange-400" />
-                      <strong className="text-gray-300">
-                        {formatCount(totalViews)}
-                      </strong>
-                      views
-                    </span>
-                  </div>
                 </div>
               </div>
 
-              <div className="flex shrink-0 flex-wrap gap-2 sm:pb-1">
+              <div className="flex shrink-0 flex-wrap gap-2 sm:justify-end">
                 {isOwner ? (
                   <>
                     <Link
                       to="/profile"
-                      className="flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm font-bold text-gray-200 transition hover:border-orange-400/40 hover:bg-orange-500/10 hover:text-white"
+                      className="flex items-center justify-center gap-2 rounded-xl border border-orange-500/20 bg-orange-500/[0.06] px-4 py-3 text-sm font-bold text-orange-100 transition hover:border-orange-400/50 hover:bg-orange-500/15"
                     >
                       <Pencil size={16} />
                       Edit Profile
@@ -816,7 +874,7 @@ export default function Channel() {
                     disabled={subscriptionLoading}
                     className={`flex items-center justify-center gap-2 rounded-xl px-6 py-3 text-sm font-bold transition disabled:cursor-not-allowed disabled:opacity-60 ${
                       channel.isSubscribed
-                        ? 'border border-white/10 bg-white/[0.05] text-white hover:bg-white/10'
+                        ? 'border border-orange-500/20 bg-orange-500/[0.08] text-orange-100 hover:bg-orange-500/15'
                         : 'bg-orange-500 text-white shadow-lg shadow-orange-950/30 hover:-translate-y-0.5 hover:bg-orange-400'
                     }`}
                   >
@@ -849,7 +907,33 @@ export default function Channel() {
           </div>
         )}
 
-        <div className="mt-8 border-b border-white/[0.08]">
+        <section className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-4">
+          <ChannelStat
+            icon={MessageCircle}
+            label="Total Comments"
+            value={totalComments}
+          />
+
+          <ChannelStat
+            icon={Heart}
+            label="Total Likes"
+            value={totalLikes}
+          />
+
+          <ChannelStat
+            icon={Eye}
+            label="Total Views"
+            value={totalViews}
+          />
+
+          <ChannelStat
+            icon={Users}
+            label="Subscribers"
+            value={totalSubscribers}
+          />
+        </section>
+
+        <div className="mt-8 border-b border-orange-500/15">
           <div className="flex gap-7 overflow-x-auto">
             {tabs.map((tab) => {
               const Icon = tab.icon
@@ -863,7 +947,7 @@ export default function Channel() {
                   className={`relative flex shrink-0 items-center gap-2.5 py-4 text-sm font-bold transition ${
                     active
                       ? 'text-orange-300'
-                      : 'text-gray-500 hover:text-white'
+                      : 'text-orange-100/45 hover:text-orange-100'
                   }`}
                 >
                   <Icon size={17} />
@@ -890,7 +974,7 @@ export default function Channel() {
                     </h2>
                   </div>
 
-                  <p className="mt-2 text-xs text-gray-500 sm:text-sm">
+                  <p className="mt-2 text-xs text-orange-100/45 sm:text-sm">
                     Discover the latest Shorts from this creator
                   </p>
                 </div>
@@ -925,47 +1009,6 @@ export default function Channel() {
                 />
               )}
             </section>
-
-            <section>
-              <div className="mb-5 flex items-center gap-2">
-                <span className="h-6 w-1 rounded-full bg-orange-500" />
-                <h2 className="text-xl font-black tracking-tight text-white">
-                  Channel Overview
-                </h2>
-              </div>
-
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                <ChannelStat
-                  icon={Users}
-                  label="Total Subscribers"
-                  value={channel.subscriberCount}
-                />
-
-                <ChannelStat
-                  icon={Film}
-                  label="Published Shorts"
-                  value={channel.shortsCount ?? shorts.length}
-                />
-
-                <ChannelStat
-                  icon={Eye}
-                  label="Total Views"
-                  value={totalViews}
-                />
-
-                <ChannelStat
-                  icon={Heart}
-                  label="Total Likes"
-                  value={totalLikes}
-                />
-
-                <ChannelStat
-                  icon={MessageCircle}
-                  label="Total Comments"
-                  value={totalComments}
-                />
-              </div>
-            </section>
           </div>
         )}
 
@@ -980,7 +1023,7 @@ export default function Channel() {
                 <h2 className="text-xl font-black text-white sm:text-2xl">
                   Published Shorts
                 </h2>
-                <p className="mt-1 text-xs text-gray-500">
+                <p className="mt-1 text-xs text-orange-100/45">
                   All public Shorts from this channel
                 </p>
               </div>
@@ -1004,7 +1047,7 @@ export default function Channel() {
 
         {activeTab === 'about' && (
           <section className="mt-8 grid gap-5 lg:grid-cols-[1.5fr_1fr]">
-            <div className="rounded-3xl border border-white/[0.07] bg-[#130e1e] p-5 sm:p-7">
+            <div className="rounded-3xl border border-orange-500/10 bg-[#1b120b] p-5 sm:p-7">
               <div className="mb-6 flex items-center gap-3">
                 <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-orange-500/20 bg-orange-500/10 text-orange-400">
                   <Info size={21} />
@@ -1014,13 +1057,13 @@ export default function Channel() {
                   <h2 className="text-lg font-black text-white">
                     About this channel
                   </h2>
-                  <p className="mt-0.5 text-xs text-gray-500">
+                  <p className="mt-0.5 text-xs text-orange-100/45">
                     Get to know this creator
                   </p>
                 </div>
               </div>
 
-              <p className="whitespace-pre-wrap text-sm leading-7 text-gray-400">
+              <p className="whitespace-pre-wrap text-sm leading-7 text-orange-100/65">
                 {profile.bio || 'This channel has not added a description yet.'}
               </p>
 
@@ -1042,7 +1085,7 @@ export default function Channel() {
               )}
             </div>
 
-            <div className="rounded-3xl border border-white/[0.07] bg-[#130e1e] p-5 sm:p-7">
+            <div className="rounded-3xl border border-orange-500/10 bg-[#1b120b] p-5 sm:p-7">
               <div className="mb-6 flex items-center gap-3">
                 <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-orange-500/20 bg-orange-500/10 text-orange-400">
                   <Sparkles size={21} />
@@ -1052,7 +1095,7 @@ export default function Channel() {
                   <h2 className="text-lg font-black text-white">
                     Channel Information
                   </h2>
-                  <p className="mt-0.5 text-xs text-gray-500">
+                  <p className="mt-0.5 text-xs text-orange-100/45">
                     Creator details
                   </p>
                 </div>
@@ -1060,78 +1103,82 @@ export default function Channel() {
 
               <div className="space-y-5">
                 <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/[0.04] text-orange-400">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-orange-500/10 text-orange-400">
                     <CalendarDays size={18} />
                   </div>
 
                   <div>
-                    <p className="text-xs text-gray-500">Joined Anime Vault</p>
-                    <p className="mt-1 text-sm font-semibold text-gray-200">
+                    <p className="text-xs text-orange-100/45">
+                      Joined Anime Vault
+                    </p>
+                    <p className="mt-1 text-sm font-semibold text-orange-50">
                       {formatDate(profile.createdAt)}
                     </p>
                   </div>
                 </div>
 
                 <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/[0.04] text-orange-400">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-orange-500/10 text-orange-400">
                     <Users size={18} />
                   </div>
 
                   <div>
-                    <p className="text-xs text-gray-500">Subscribers</p>
-                    <p className="mt-1 text-sm font-semibold text-gray-200">
-                      {formatCount(channel.subscriberCount)}
+                    <p className="text-xs text-orange-100/45">Subscribers</p>
+                    <p className="mt-1 text-sm font-semibold text-orange-50">
+                      {formatCount(totalSubscribers)}
                     </p>
                   </div>
                 </div>
 
                 <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/[0.04] text-orange-400">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-orange-500/10 text-orange-400">
                     <Video size={18} />
                   </div>
 
                   <div>
-                    <p className="text-xs text-gray-500">Published Shorts</p>
-                    <p className="mt-1 text-sm font-semibold text-gray-200">
+                    <p className="text-xs text-orange-100/45">
+                      Published Shorts
+                    </p>
+                    <p className="mt-1 text-sm font-semibold text-orange-50">
                       {formatCount(channel.shortsCount ?? shorts.length)}
                     </p>
                   </div>
                 </div>
 
                 <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/[0.04] text-orange-400">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-orange-500/10 text-orange-400">
                     <Eye size={18} />
                   </div>
 
                   <div>
-                    <p className="text-xs text-gray-500">Total Views</p>
-                    <p className="mt-1 text-sm font-semibold text-gray-200">
+                    <p className="text-xs text-orange-100/45">Total Views</p>
+                    <p className="mt-1 text-sm font-semibold text-orange-50">
                       {formatCount(totalViews)}
                     </p>
                   </div>
                 </div>
 
                 <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/[0.04] text-orange-400">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-orange-500/10 text-orange-400">
                     <Heart size={18} />
                   </div>
 
                   <div>
-                    <p className="text-xs text-gray-500">Total Likes</p>
-                    <p className="mt-1 text-sm font-semibold text-gray-200">
+                    <p className="text-xs text-orange-100/45">Total Likes</p>
+                    <p className="mt-1 text-sm font-semibold text-orange-50">
                       {formatCount(totalLikes)}
                     </p>
                   </div>
                 </div>
 
                 <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/[0.04] text-orange-400">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-orange-500/10 text-orange-400">
                     <MessageCircle size={18} />
                   </div>
 
                   <div>
-                    <p className="text-xs text-gray-500">Total Comments</p>
-                    <p className="mt-1 text-sm font-semibold text-gray-200">
+                    <p className="text-xs text-orange-100/45">Total Comments</p>
+                    <p className="mt-1 text-sm font-semibold text-orange-50">
                       {formatCount(totalComments)}
                     </p>
                   </div>

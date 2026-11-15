@@ -1,13 +1,11 @@
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import {
   Search,
   SlidersHorizontal,
   X,
   Star,
-  ChevronLeft,
-  ChevronRight,
   Compass,
   Flame,
   Sparkles,
@@ -17,9 +15,20 @@ import {
   Bookmark,
   Check,
   LoaderCircle,
+  ChevronDown,
+  CalendarDays,
+  Tv,
+  Play,
+  Library,
+  Filter,
 } from "lucide-react";
 
-import { searchAnime, getPopularAnime, getTrendingAnime } from "../lib/jikan";
+import {
+  searchAnime,
+  getPopularAnime,
+  getTrendingAnime,
+} from "../lib/jikan";
+
 import { supabase } from "../lib/supabase";
 import { useAuthStore } from "../features/auth/authStore";
 
@@ -40,9 +49,9 @@ const genres = [
 ];
 
 const sortOptions = [
-  { label: "Popularity", value: "popularity" },
+  { label: "Most Popular", value: "popularity" },
   { label: "Highest Rated", value: "score" },
-  { label: "Newest", value: "newest" },
+  { label: "Newest First", value: "newest" },
   { label: "Title A–Z", value: "title" },
 ];
 
@@ -57,6 +66,7 @@ const getTitle = (anime) =>
   anime?.titleEnglish ||
   anime?.title ||
   anime?.titleRomaji ||
+  anime?.titleJapanese ||
   "Unknown Anime";
 
 const getImage = (anime) =>
@@ -69,12 +79,29 @@ const getImage = (anime) =>
 const getYear = (anime) =>
   anime?.seasonYear ||
   anime?.startDate?.year ||
+  anime?.year ||
   null;
 
 const getScore = (anime) => {
   const score = Number(anime?.averageScore ?? anime?.score);
 
-  return Number.isFinite(score) && score > 0 ? score : null;
+  if (!Number.isFinite(score) || score <= 0) return null;
+
+  return score > 10 ? score / 10 : score;
+};
+
+const getGenres = (anime) =>
+  (anime?.genres || [])
+    .map((genre) =>
+      typeof genre === "string" ? genre : genre?.name
+    )
+    .filter(Boolean);
+
+const getStatusLabel = (status) => {
+  if (status === "RELEASING") return "AIRING";
+  if (status === "FINISHED") return "COMPLETED";
+  if (status === "NOT_YET_RELEASED") return "UPCOMING";
+  return null;
 };
 
 function AnimeCard({ anime, saved, saving, onSave }) {
@@ -84,139 +111,202 @@ function AnimeCard({ anime, saved, saving, onSave }) {
   const image = getImage(anime);
   const score = getScore(anime);
   const year = getYear(anime);
+  const animeGenres = getGenres(anime);
+  const statusLabel = getStatusLabel(anime.status);
 
   return (
-    <div className="group min-w-0">
-      <Link to={`/anime/${anime.id}`} className="block">
-        <div className="relative aspect-[3/4] overflow-hidden rounded-xl bg-[#191926]">
-          {!imageFailed && image ? (
-            <img
-              src={image}
-              alt={title}
-              loading="lazy"
-              onError={() => setImageFailed(true)}
-              className="h-full w-full object-cover transition duration-500 group-hover:scale-105"
-            />
-          ) : (
-            <div className="flex h-full flex-col items-center justify-center gap-3 p-3 text-center">
-              <Clapperboard size={30} className="text-purple-400" />
-              <span className="text-sm font-semibold text-gray-300">
+    <article className="group min-w-0">
+      <div className="relative">
+        <Link
+          to={`/anime/${anime.id}`}
+          className="block overflow-hidden rounded-2xl border border-white/[0.06] bg-[#151515] transition duration-300 group-hover:border-orange-500/40 group-hover:shadow-[0_12px_40px_rgba(249,115,22,0.12)]"
+        >
+          <div className="relative aspect-[3/4] overflow-hidden">
+            {!imageFailed && image ? (
+              <img
+                src={image}
+                alt={title}
+                loading="lazy"
+                onError={() => setImageFailed(true)}
+                className="h-full w-full object-cover transition duration-700 group-hover:scale-110"
+              />
+            ) : (
+              <div className="flex h-full flex-col items-center justify-center gap-3 bg-gradient-to-br from-[#25160e] to-[#111] p-4 text-center">
+                <Clapperboard size={34} className="text-orange-500" />
+                <span className="text-sm font-bold text-gray-300">
+                  {title}
+                </span>
+              </div>
+            )}
+
+            <div className="absolute inset-0 bg-gradient-to-t from-black via-black/10 to-black/20 opacity-80 transition group-hover:opacity-95" />
+
+            <div className="absolute inset-x-0 top-0 flex items-start justify-between gap-2 p-3">
+              {statusLabel ? (
+                <span
+                  className={`rounded-lg border px-2 py-1 text-[9px] font-black tracking-wider backdrop-blur-md ${
+                    anime.status === "RELEASING"
+                      ? "border-emerald-400/20 bg-emerald-500/80 text-white"
+                      : anime.status === "NOT_YET_RELEASED"
+                        ? "border-orange-400/20 bg-orange-500/90 text-white"
+                        : "border-white/10 bg-black/70 text-gray-200"
+                  }`}
+                >
+                  {statusLabel}
+                </span>
+              ) : (
+                <span />
+              )}
+
+              {score !== null && (
+                <span className="flex items-center gap-1 rounded-lg border border-orange-400/20 bg-black/75 px-2 py-1 text-xs font-black text-orange-300 backdrop-blur-md">
+                  <Star size={12} fill="currentColor" />
+                  {score.toFixed(1)}
+                </span>
+              )}
+            </div>
+
+            <div className="absolute inset-x-0 bottom-0 p-3 sm:p-4">
+              <div className="mb-2 flex h-8 w-8 items-center justify-center rounded-full border border-white/20 bg-white/10 text-white opacity-0 backdrop-blur-md transition duration-300 group-hover:opacity-100">
+                <Play size={14} fill="currentColor" />
+              </div>
+
+              <h3 className="line-clamp-2 text-sm font-extrabold leading-snug text-white sm:text-base">
                 {title}
-              </span>
+              </h3>
+
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px] font-medium text-gray-300">
+                {year && (
+                  <span className="flex items-center gap-1">
+                    <CalendarDays size={11} />
+                    {year}
+                  </span>
+                )}
+
+                {anime.format && (
+                  <span className="rounded bg-white/10 px-1.5 py-0.5">
+                    {anime.format}
+                  </span>
+                )}
+
+                {anime.episodes && (
+                  <span>{anime.episodes} episodes</span>
+                )}
+              </div>
             </div>
-          )}
-
-          <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-transparent to-black/20 opacity-75 transition group-hover:opacity-100" />
-
-          {score !== null && (
-            <div className="absolute right-2 top-2 flex items-center gap-1 rounded-lg bg-black/75 px-2 py-1 text-xs font-bold text-yellow-300 backdrop-blur">
-              <Star size={12} fill="currentColor" />
-              {(score / 10).toFixed(1)}
-            </div>
-          )}
-
-          {anime.status === "RELEASING" && (
-            <span className="absolute left-2 top-2 rounded-md bg-emerald-500/90 px-2 py-1 text-[10px] font-bold text-white">
-              AIRING
-            </span>
-          )}
-
-          {anime.status === "NOT_YET_RELEASED" && (
-            <span className="absolute left-2 top-2 rounded-md bg-purple-600/90 px-2 py-1 text-[10px] font-bold text-white">
-              UPCOMING
-            </span>
-          )}
-
-          <div className="absolute inset-x-0 bottom-0 p-3">
-            <h3 className="line-clamp-2 text-sm font-bold text-white sm:text-base">
-              {title}
-            </h3>
-
-            <p className="mt-1 text-xs text-gray-300">
-              {[
-                year,
-                anime.format,
-                anime.episodes ? `${anime.episodes} eps` : null,
-              ]
-                .filter(Boolean)
-                .join(" · ") || "Anime"}
-            </p>
           </div>
-        </div>
-      </Link>
+        </Link>
 
-      <div className="mt-2 flex items-center justify-between gap-2">
-        <div className="flex min-w-0 flex-wrap gap-1.5">
-          {(anime.genres || []).slice(0, 2).map((genre) => (
+        <button
+          type="button"
+          onClick={() => onSave(anime)}
+          disabled={saving}
+          title={saved ? "Already in My Vault" : "Save to My Vault"}
+          aria-label={
+            saved
+              ? `${title} is saved`
+              : `Save ${title} to My Vault`
+          }
+          className={`absolute bottom-3 right-3 z-10 flex h-9 w-9 items-center justify-center rounded-xl border backdrop-blur-md transition duration-200 ${
+            saved
+              ? "border-emerald-400/30 bg-emerald-500/20 text-emerald-300"
+              : "border-white/20 bg-black/60 text-white hover:border-orange-400/50 hover:bg-orange-500 hover:text-white"
+          } disabled:cursor-not-allowed disabled:opacity-70`}
+        >
+          {saving ? (
+            <LoaderCircle size={17} className="animate-spin" />
+          ) : saved ? (
+            <Check size={17} />
+          ) : (
+            <Bookmark size={17} />
+          )}
+        </button>
+      </div>
+
+      <div className="mt-3 min-w-0 px-0.5">
+        <Link
+          to={`/anime/${anime.id}`}
+          className="line-clamp-1 text-xs font-bold text-gray-200 transition hover:text-orange-400 sm:text-sm"
+        >
+          {title}
+        </Link>
+
+        <div className="mt-2 flex min-h-5 flex-wrap gap-1.5">
+          {animeGenres.slice(0, 2).map((genre) => (
             <span
               key={genre}
-              className="rounded-md bg-white/5 px-2 py-1 text-[10px] text-gray-400"
+              className="rounded-md border border-white/[0.06] bg-white/[0.04] px-2 py-1 text-[9px] font-semibold text-gray-500"
             >
               {genre}
             </span>
           ))}
         </div>
-
-        <button
-          type="button"
-          onClick={() => onSave(anime)}
-          disabled={saved || saving}
-          title={saved ? "Already in My Vault" : "Save to My Vault"}
-          className={`flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-2 text-xs font-bold transition ${
-            saved
-              ? "bg-emerald-500/10 text-emerald-400"
-              : "bg-purple-600/15 text-purple-300 hover:bg-purple-600 hover:text-white"
-          } disabled:cursor-not-allowed`}
-        >
-          {saving ? (
-            <LoaderCircle size={15} className="animate-spin" />
-          ) : saved ? (
-            <Check size={15} />
-          ) : (
-            <Bookmark size={15} />
-          )}
-
-          <span>{saved ? "Saved" : saving ? "Saving" : "Save"}</span>
-        </button>
       </div>
-    </div>
+    </article>
   );
 }
 
 function SkeletonGrid() {
   return (
-    <div className="grid grid-cols-2 gap-x-3 gap-y-6 sm:grid-cols-3 sm:gap-x-4 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
-      {Array.from({ length: 12 }).map((_, index) => (
+    <div className="grid grid-cols-2 gap-x-3 gap-y-7 sm:grid-cols-3 sm:gap-x-5 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
+      {Array.from({ length: 18 }).map((_, index) => (
         <div key={index} className="animate-pulse">
-          <div className="aspect-[3/4] rounded-xl bg-white/5" />
-          <div className="mt-3 h-3 w-4/5 rounded bg-white/5" />
-          <div className="mt-2 h-3 w-2/5 rounded bg-white/5" />
+          <div className="aspect-[3/4] rounded-2xl bg-white/[0.05]" />
+          <div className="mt-3 h-3 w-4/5 rounded bg-white/[0.06]" />
+          <div className="mt-2 h-3 w-2/5 rounded bg-white/[0.04]" />
         </div>
       ))}
     </div>
   );
 }
 
+function EmptyState({ onClear }) {
+  return (
+    <div className="rounded-3xl border border-white/[0.07] bg-gradient-to-br from-[#19130f] to-[#101010] px-5 py-20 text-center">
+      <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-3xl border border-orange-500/20 bg-orange-500/10 text-orange-400">
+        <Search size={32} />
+      </div>
+
+      <h3 className="mt-6 text-xl font-black text-white">
+        No anime found
+      </h3>
+
+      <p className="mx-auto mt-2 max-w-sm text-sm leading-6 text-gray-500">
+        We couldn't find anything matching your search.
+        Try another title or change your filters.
+      </p>
+
+      <button
+        type="button"
+        onClick={onClear}
+        className="mt-6 inline-flex items-center gap-2 rounded-xl bg-orange-500 px-5 py-3 text-sm font-black text-black transition hover:bg-orange-400"
+      >
+        <RefreshCw size={16} />
+        Reset Explore
+      </button>
+    </div>
+  );
+}
+
 export default function Explore() {
   const [searchParams, setSearchParams] = useSearchParams();
+
   const user = useAuthStore((state) => state.user);
 
   const [query, setQuery] = useState(searchParams.get("q") || "");
   const [genre, setGenre] = useState(searchParams.get("genre") || "");
   const [status, setStatus] = useState(searchParams.get("status") || "");
   const [sort, setSort] = useState(searchParams.get("sort") || "popularity");
-  const [page, setPage] = useState(
-    Math.max(1, Number(searchParams.get("page")) || 1)
-  );
 
   const [anime, setAnime] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [hasNextPage, setHasNextPage] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
 
   const [savedAnimeIds, setSavedAnimeIds] = useState([]);
   const [savingAnimeId, setSavingAnimeId] = useState(null);
+  const [savedLoading, setSavedLoading] = useState(false);
+
   const [notice, setNotice] = useState(null);
 
   const loadSavedAnime = useCallback(async () => {
@@ -225,17 +315,28 @@ export default function Explore() {
       return;
     }
 
-    const { data, error: savedError } = await supabase
-      .from("saved_anime")
-      .select("anime_id")
-      .eq("user_id", user.id);
+    setSavedLoading(true);
 
-    if (savedError) {
-      console.error("Failed to load saved anime:", savedError);
-      return;
+    try {
+      const { data, error } = await supabase
+        .from("saved_anime")
+        .select("anime_id")
+        .eq("user_id", user.id);
+
+      if (error) throw error;
+
+      setSavedAnimeIds(
+        (data || []).map((item) => String(item.anime_id))
+      );
+    } catch (err) {
+      console.error("Failed to load saved anime:", err);
+      setNotice({
+        type: "error",
+        message: err.message || "Could not load your saved anime.",
+      });
+    } finally {
+      setSavedLoading(false);
     }
-
-    setSavedAnimeIds((data || []).map((item) => String(item.anime_id)));
   }, [user?.id]);
 
   useEffect(() => {
@@ -246,16 +347,14 @@ export default function Explore() {
     if (!user?.id) {
       setNotice({
         type: "error",
-        message: "Please sign in before saving anime to your vault.",
+        message: "Please sign in to save anime to My Vault.",
       });
       return;
     }
 
     const animeId = String(item.id);
 
-    if (savedAnimeIds.includes(animeId)) {
-      return;
-    }
+    if (savingAnimeId === animeId) return;
 
     setSavingAnimeId(animeId);
     setNotice(null);
@@ -263,14 +362,12 @@ export default function Explore() {
     try {
       const { data: existing, error: checkError } = await supabase
         .from("saved_anime")
-        .select("id")
+        .select("anime_id")
         .eq("user_id", user.id)
         .eq("anime_id", item.id)
         .maybeSingle();
 
-      if (checkError) {
-        throw checkError;
-      }
+      if (checkError) throw checkError;
 
       if (existing) {
         setSavedAnimeIds((current) =>
@@ -279,7 +376,7 @@ export default function Explore() {
 
         setNotice({
           type: "success",
-          message: `${getTitle(item)} is already in your vault.`,
+          message: `${getTitle(item)} is already in My Vault.`,
         });
 
         return;
@@ -296,11 +393,11 @@ export default function Explore() {
           anime_episodes: item.episodes ?? null,
         });
 
-      if (insertError) {
-        throw insertError;
-      }
+      if (insertError) throw insertError;
 
-      setSavedAnimeIds((current) => [...current, animeId]);
+      setSavedAnimeIds((current) =>
+        current.includes(animeId) ? current : [...current, animeId]
+      );
 
       setNotice({
         type: "success",
@@ -324,7 +421,7 @@ export default function Explore() {
 
     try {
       const options = {
-        page,
+        page: 1,
         perPage: 50,
       };
 
@@ -340,15 +437,13 @@ export default function Explore() {
 
       const results = Array.isArray(response)
         ? response
-        : response?.results || [];
-
-      const pageInfo = response?.pageInfo || null;
+        : response?.results || response?.data || [];
 
       let filtered = [...results];
 
       if (genre) {
         filtered = filtered.filter((item) =>
-          (item.genres || []).some(
+          getGenres(item).some(
             (itemGenre) =>
               itemGenre.toLowerCase() === genre.toLowerCase()
           )
@@ -356,7 +451,9 @@ export default function Explore() {
       }
 
       if (status) {
-        filtered = filtered.filter((item) => item.status === status);
+        filtered = filtered.filter(
+          (item) => item.status === status
+        );
       }
 
       if (sort === "score") {
@@ -368,7 +465,9 @@ export default function Explore() {
           (a, b) => (getYear(b) || 0) - (getYear(a) || 0)
         );
       } else if (sort === "title") {
-        filtered.sort((a, b) => getTitle(a).localeCompare(getTitle(b)));
+        filtered.sort((a, b) =>
+          getTitle(a).localeCompare(getTitle(b))
+        );
       } else {
         filtered.sort(
           (a, b) => (b.popularity || 0) - (a.popularity || 0)
@@ -377,55 +476,36 @@ export default function Explore() {
 
       setAnime(filtered);
 
-      setHasNextPage(
-        pageInfo
-          ? Boolean(pageInfo.hasNextPage)
-          : results.length >= options.perPage
-      );
-
       const nextParams = new URLSearchParams();
 
       if (query.trim()) nextParams.set("q", query.trim());
       if (genre) nextParams.set("genre", genre);
       if (status) nextParams.set("status", status);
       if (sort !== "popularity") nextParams.set("sort", sort);
-      if (page > 1) nextParams.set("page", String(page));
 
       setSearchParams(nextParams, { replace: true });
     } catch (err) {
       console.error("Failed to load anime:", err);
       setAnime([]);
-      setHasNextPage(false);
-
       setError(
         "We couldn't load anime right now. Check your connection and try again."
       );
     } finally {
       setLoading(false);
     }
-  }, [query, genre, status, sort, page, setSearchParams]);
+  }, [query, genre, status, sort, setSearchParams]);
 
   useEffect(() => {
     loadAnime();
   }, [loadAnime]);
-
-  const submitSearch = (event) => {
-    event.preventDefault();
-
-    if (page !== 1) {
-      setPage(1);
-    } else {
-      loadAnime();
-    }
-  };
 
   const clearFilters = () => {
     setQuery("");
     setGenre("");
     setStatus("");
     setSort("popularity");
-    setPage(1);
     setSearchParams({});
+    setNotice(null);
   };
 
   const hasFilters = Boolean(
@@ -444,54 +524,71 @@ export default function Explore() {
             ? "Completed Anime"
             : "Explore Anime";
 
-  return (
-    <main className="min-h-screen bg-[#09090f] text-white">
-      <div className="mx-auto max-w-[1800px] px-5 py-8 sm:px-8 lg:px-12">
-        <section className="relative mb-8 overflow-hidden rounded-3xl border border-white/10 bg-gradient-to-br from-purple-950/70 via-[#171326] to-[#101018] p-6 sm:p-10">
-          <div className="pointer-events-none absolute -right-12 -top-20 h-64 w-64 rounded-full bg-purple-500/15 blur-3xl" />
-          <div className="pointer-events-none absolute -bottom-24 left-1/3 h-48 w-48 rounded-full bg-fuchsia-500/10 blur-3xl" />
+  const savedCount = savedAnimeIds.length;
 
-          <div className="relative">
-            <div className="mb-4 flex items-center gap-2 text-sm font-bold uppercase tracking-widest text-purple-300">
-              <Compass size={18} />
-              Discover
+  const activeFilters = useMemo(
+    () =>
+      [
+        genre && genre,
+        status && statusOptions.find((item) => item.value === status)?.label,
+        sort !== "popularity" &&
+          sortOptions.find((item) => item.value === sort)?.label,
+      ].filter(Boolean),
+    [genre, status, sort]
+  );
+
+  return (
+    <main className="min-h-screen overflow-hidden bg-[#090909] text-white">
+      <div className="mx-auto max-w-[1900px] px-4 py-6 sm:px-7 sm:py-9 lg:px-10">
+        <section className="relative mb-10 overflow-hidden rounded-[28px] border border-orange-500/15 bg-gradient-to-br from-[#291306] via-[#17100b] to-[#101010] p-6 sm:p-10 lg:p-14">
+          <div className="pointer-events-none absolute -right-24 -top-24 h-80 w-80 rounded-full bg-orange-500/20 blur-[100px]" />
+          <div className="pointer-events-none absolute -bottom-32 left-1/3 h-72 w-72 rounded-full bg-red-600/10 blur-[100px]" />
+
+          <div className="pointer-events-none absolute right-8 top-8 hidden rotate-12 text-orange-500/[0.07] lg:block">
+            <Clapperboard size={210} strokeWidth={1} />
+          </div>
+
+          <div className="relative z-10 max-w-3xl">
+            <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-orange-400/20 bg-orange-500/10 px-3 py-2 text-[10px] font-black uppercase tracking-[0.2em] text-orange-400 sm:text-xs">
+              <Compass size={15} />
+              AnimeVault Discovery
             </div>
 
-            <h1 className="max-w-2xl text-3xl font-black tracking-tight sm:text-5xl">
-              Find your
-              <span className="block text-purple-400">
-                anime obsession.
+            <h1 className="text-4xl font-black leading-[1.08] tracking-tight sm:text-6xl lg:text-7xl">
+              Your next
+              <span className="block bg-gradient-to-r from-orange-400 via-orange-500 to-amber-300 bg-clip-text text-transparent">
+                obsession starts here.
               </span>
             </h1>
 
-            <p className="mt-4 max-w-xl text-sm leading-6 text-gray-400 sm:text-base">
-              Explore anime, discover hidden gems, and find your next
-              favourite story.
+            <p className="mt-5 max-w-xl text-sm leading-7 text-gray-400 sm:text-base">
+              Explore incredible anime, discover hidden gems,
+              and build your personal collection.
             </p>
 
             <form
-              onSubmit={submitSearch}
-              className="mt-7 flex max-w-2xl items-center gap-3 rounded-2xl border border-white/10 bg-black/30 p-2 pl-4 focus-within:border-purple-500/60"
+              onSubmit={(event) => {
+                event.preventDefault();
+                loadAnime();
+              }}
+              className="mt-8 flex max-w-2xl items-center gap-2 rounded-2xl border border-white/10 bg-black/50 p-2 pl-4 shadow-2xl transition focus-within:border-orange-500/50"
             >
-              <Search size={20} className="shrink-0 text-gray-500" />
+              <Search size={20} className="shrink-0 text-orange-400" />
 
               <input
                 type="search"
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 placeholder="Search anime titles..."
-                className="min-w-0 flex-1 bg-transparent py-2 text-sm outline-none placeholder:text-gray-500"
+                className="min-w-0 flex-1 bg-transparent py-3 text-sm text-white outline-none placeholder:text-gray-600"
               />
 
               {query && (
                 <button
                   type="button"
-                  onClick={() => {
-                    setQuery("");
-                    setPage(1);
-                  }}
+                  onClick={() => setQuery("")}
                   aria-label="Clear search"
-                  className="rounded-lg p-1.5 text-gray-400 hover:bg-white/10 hover:text-white"
+                  className="rounded-lg p-2 text-gray-500 transition hover:bg-white/10 hover:text-white"
                 >
                   <X size={17} />
                 </button>
@@ -499,54 +596,107 @@ export default function Explore() {
 
               <button
                 type="submit"
-                className="rounded-xl bg-purple-600 px-4 py-2.5 text-sm font-bold transition hover:bg-purple-500"
+                className="shrink-0 rounded-xl bg-orange-500 px-5 py-3 text-sm font-black text-black transition hover:bg-orange-400"
               >
                 Search
               </button>
             </form>
+
+            <div className="mt-6 flex flex-wrap items-center gap-5 text-xs font-semibold text-gray-500">
+              <span className="flex items-center gap-2">
+                <Flame size={15} className="text-orange-400" />
+                Discover popular anime
+              </span>
+              <span className="flex items-center gap-2">
+                <Bookmark size={15} className="text-orange-400" />
+                Save to your vault
+              </span>
+              <span className="flex items-center gap-2">
+                <Sparkles size={15} className="text-orange-400" />
+                Find your next favourite
+              </span>
+            </div>
           </div>
         </section>
 
         {notice && (
           <div
-            className={`mb-6 flex items-center justify-between gap-3 rounded-xl border p-4 text-sm ${
+            className={`mb-7 flex items-center justify-between gap-3 rounded-2xl border p-4 text-sm ${
               notice.type === "success"
-                ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-300"
-                : "border-red-500/20 bg-red-500/10 text-red-300"
+                ? "border-emerald-500/20 bg-emerald-500/[0.08] text-emerald-300"
+                : "border-red-500/20 bg-red-500/[0.08] text-red-300"
             }`}
           >
-            <p>{notice.message}</p>
-
+            <div className="flex items-center gap-3">
+              {notice.type === "success" ? <Check size={18} /> : <X size={18} />}
+              <p>{notice.message}</p>
+            </div>
             <button
               type="button"
               onClick={() => setNotice(null)}
-              className="shrink-0 rounded-lg p-1 hover:bg-white/10"
               aria-label="Dismiss message"
+              className="rounded-lg p-1 transition hover:bg-white/10"
             >
               <X size={17} />
             </button>
           </div>
         )}
 
-        <section className="mb-8">
-          <div className="mb-3 flex items-center gap-2">
-            <Flame size={19} className="text-orange-400" />
-            <h2 className="font-bold">Browse genres</h2>
+        <section className="mb-9 grid grid-cols-2 gap-3 sm:grid-cols-3">
+          <div className="flex items-center gap-3 rounded-2xl border border-white/[0.06] bg-[#111] p-4">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-orange-500/10 text-orange-400">
+              <Compass size={21} />
+            </div>
+            <div>
+              <p className="text-lg font-black text-white">Explore</p>
+              <p className="text-[10px] text-gray-500">Discover anime</p>
+            </div>
           </div>
 
-          <div className="flex gap-2 overflow-x-auto pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <div className="flex items-center gap-3 rounded-2xl border border-white/[0.06] bg-[#111] p-4">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-orange-500/10 text-orange-400">
+              <Library size={21} />
+            </div>
+            <div>
+              <p className="text-lg font-black text-white">
+                {savedLoading ? "..." : savedCount}
+              </p>
+              <p className="text-[10px] text-gray-500">Saved in My Vault</p>
+            </div>
+          </div>
+
+          <div className="col-span-2 flex items-center gap-3 rounded-2xl border border-white/[0.06] bg-[#111] p-4 sm:col-span-1">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-orange-500/10 text-orange-400">
+              <Tv size={21} />
+            </div>
+            <div>
+              <p className="text-lg font-black text-white">All in one</p>
+              <p className="text-[10px] text-gray-500">One continuous anime grid</p>
+            </div>
+          </div>
+        </section>
+
+        <section className="mb-10">
+          <div className="mb-4 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <Flame size={20} className="text-orange-400" />
+              <h2 className="text-lg font-black sm:text-xl">Browse genres</h2>
+            </div>
+            <span className="text-[10px] font-bold uppercase tracking-wider text-gray-600">
+              Find your vibe
+            </span>
+          </div>
+
+          <div className="flex gap-2 overflow-x-auto pb-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {genres.map((item) => (
               <button
                 key={item.value || "all"}
                 type="button"
-                onClick={() => {
-                  setGenre(item.value);
-                  setPage(1);
-                }}
-                className={`shrink-0 rounded-full border px-4 py-2 text-xs font-semibold transition sm:text-sm ${
+                onClick={() => setGenre(item.value)}
+                className={`shrink-0 rounded-full border px-4 py-2.5 text-xs font-bold transition sm:text-sm ${
                   genre === item.value
-                    ? "border-purple-500 bg-purple-600 text-white"
-                    : "border-white/10 bg-white/[0.03] text-gray-400 hover:border-purple-500/50 hover:text-white"
+                    ? "border-orange-500 bg-orange-500 text-black shadow-[0_4px_20px_rgba(249,115,22,0.2)]"
+                    : "border-white/[0.08] bg-white/[0.03] text-gray-400 hover:border-orange-500/40 hover:bg-orange-500/10 hover:text-orange-300"
                 }`}
               >
                 {item.label}
@@ -556,51 +706,64 @@ export default function Explore() {
         </section>
 
         <section>
-          <div className="mb-5 flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+          <div className="mb-6 flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
             <div>
               <div className="flex items-center gap-2">
-                <Sparkles size={20} className="text-purple-400" />
-                <h2 className="text-xl font-extrabold sm:text-2xl">
+                <Sparkles size={21} className="text-orange-400" />
+                <h2 className="text-2xl font-black tracking-tight sm:text-3xl">
                   {heading}
                 </h2>
               </div>
 
-              <p className="mt-1 text-xs text-gray-500 sm:text-sm">
-                Discover anime and find your next watch.
+              <p className="mt-2 text-xs text-gray-500 sm:text-sm">
+                Discover anime and add your favourites to My Vault.
               </p>
+
+              {activeFilters.length > 0 && (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {activeFilters.map((item) => (
+                    <span
+                      key={item}
+                      className="rounded-lg border border-orange-500/20 bg-orange-500/[0.08] px-2.5 py-1 text-[10px] font-bold text-orange-300"
+                    >
+                      {item}
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
                 onClick={() => setFiltersOpen((current) => !current)}
-                className={`flex items-center gap-2 rounded-xl border px-3 py-2.5 text-sm font-medium transition ${
+                className={`flex items-center gap-2 rounded-xl border px-4 py-3 text-xs font-bold transition ${
                   filtersOpen
-                    ? "border-purple-500 bg-purple-500/10 text-purple-300"
-                    : "border-white/10 text-gray-300 hover:bg-white/5"
+                    ? "border-orange-500/40 bg-orange-500/10 text-orange-300"
+                    : "border-white/10 bg-white/[0.03] text-gray-300 hover:border-orange-500/30 hover:text-orange-300"
                 }`}
               >
-                <SlidersHorizontal size={17} />
+                <SlidersHorizontal size={16} />
                 Filters
+                <ChevronDown
+                  size={15}
+                  className={`transition ${filtersOpen ? "rotate-180" : ""}`}
+                />
               </button>
 
-              <label className="flex items-center gap-2 rounded-xl border border-white/10 px-3 py-2.5 text-sm text-gray-300">
-                <ArrowUpDown size={16} className="text-gray-500" />
+              <label className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-3 text-xs text-gray-300 transition focus-within:border-orange-500/40">
+                <ArrowUpDown size={15} className="text-orange-400" />
                 <span className="hidden sm:inline">Sort:</span>
-
                 <select
                   value={sort}
-                  onChange={(event) => {
-                    setSort(event.target.value);
-                    setPage(1);
-                  }}
-                  className="max-w-32 bg-transparent text-sm outline-none"
+                  onChange={(event) => setSort(event.target.value)}
+                  className="max-w-32 cursor-pointer bg-transparent text-xs font-bold text-white outline-none"
                 >
                   {sortOptions.map((option) => (
                     <option
                       key={option.value}
                       value={option.value}
-                      className="bg-[#12121c]"
+                      className="bg-[#151515]"
                     >
                       {option.label}
                     </option>
@@ -611,17 +774,16 @@ export default function Explore() {
           </div>
 
           {filtersOpen && (
-            <div className="mb-6 grid grid-cols-1 gap-4 rounded-2xl border border-white/10 bg-[#12121c] p-4 sm:grid-cols-2">
-              <label className="flex flex-col gap-2 text-xs font-semibold text-gray-400">
-                Genre
-
+            <div className="mb-7 grid grid-cols-1 gap-4 rounded-2xl border border-orange-500/15 bg-gradient-to-br from-[#1c130c] to-[#111] p-5 sm:grid-cols-2">
+              <label className="flex flex-col gap-2 text-xs font-bold text-gray-400">
+                <span className="flex items-center gap-2">
+                  <Filter size={14} className="text-orange-400" />
+                  Genre
+                </span>
                 <select
                   value={genre}
-                  onChange={(event) => {
-                    setGenre(event.target.value);
-                    setPage(1);
-                  }}
-                  className="rounded-xl border border-white/10 bg-[#09090f] px-3 py-3 text-sm text-white outline-none focus:border-purple-500"
+                  onChange={(event) => setGenre(event.target.value)}
+                  className="rounded-xl border border-white/10 bg-[#090909] px-4 py-3 text-sm text-white outline-none focus:border-orange-500/50"
                 >
                   {genres.map((item) => (
                     <option key={item.value || "all"} value={item.value}>
@@ -631,16 +793,15 @@ export default function Explore() {
                 </select>
               </label>
 
-              <label className="flex flex-col gap-2 text-xs font-semibold text-gray-400">
-                Airing status
-
+              <label className="flex flex-col gap-2 text-xs font-bold text-gray-400">
+                <span className="flex items-center gap-2">
+                  <Tv size={14} className="text-orange-400" />
+                  Airing status
+                </span>
                 <select
                   value={status}
-                  onChange={(event) => {
-                    setStatus(event.target.value);
-                    setPage(1);
-                  }}
-                  className="rounded-xl border border-white/10 bg-[#09090f] px-3 py-3 text-sm text-white outline-none focus:border-purple-500"
+                  onChange={(event) => setStatus(event.target.value)}
+                  className="rounded-xl border border-white/10 bg-[#090909] px-4 py-3 text-sm text-white outline-none focus:border-orange-500/50"
                 >
                   {statusOptions.map((option) => (
                     <option key={option.value || "any"} value={option.value}>
@@ -654,25 +815,48 @@ export default function Explore() {
                 <button
                   type="button"
                   onClick={clearFilters}
-                  className="flex items-center gap-2 text-sm font-semibold text-purple-300 transition hover:text-purple-200 sm:col-span-2"
+                  className="flex items-center gap-2 text-xs font-bold text-orange-400 transition hover:text-orange-300 sm:col-span-2"
                 >
-                  <X size={16} />
+                  <X size={15} />
                   Clear all filters
                 </button>
               )}
             </div>
           )}
 
-          {error && (
-            <div className="rounded-2xl border border-red-500/20 bg-red-500/5 p-6 text-center">
-              <p className="text-sm text-red-300">{error}</p>
+          {!loading && !error && anime.length > 0 && (
+            <div className="mb-5 flex items-center justify-between gap-3 border-b border-white/[0.06] pb-4">
+              <p className="text-xs font-medium text-gray-500">
+                Showing{" "}
+                <span className="font-black text-orange-400">{anime.length}</span>{" "}
+                anime results
+              </p>
 
+              {hasFilters && (
+                <button
+                  type="button"
+                  onClick={clearFilters}
+                  className="flex items-center gap-1.5 text-[10px] font-bold text-gray-500 transition hover:text-orange-400"
+                >
+                  <X size={13} />
+                  Reset
+                </button>
+              )}
+            </div>
+          )}
+
+          {error && (
+            <div className="rounded-3xl border border-red-500/20 bg-red-500/[0.05] p-8 text-center">
+              <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-red-500/10 text-red-400">
+                <RefreshCw size={25} />
+              </div>
+              <p className="mt-4 text-sm font-bold text-red-300">{error}</p>
               <button
                 type="button"
                 onClick={loadAnime}
-                className="mt-4 inline-flex items-center gap-2 rounded-xl bg-white/10 px-4 py-2 text-sm font-semibold transition hover:bg-white/15"
+                className="mt-5 inline-flex items-center gap-2 rounded-xl bg-orange-500 px-5 py-3 text-xs font-black text-black transition hover:bg-orange-400"
               >
-                <RefreshCw size={16} />
+                <RefreshCw size={15} />
                 Try again
               </button>
             </div>
@@ -681,81 +865,34 @@ export default function Explore() {
           {loading && !error && <SkeletonGrid />}
 
           {!loading && !error && anime.length > 0 && (
-            <>
-              <div className="grid grid-cols-2 gap-x-3 gap-y-6 sm:grid-cols-3 sm:gap-x-4 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
-                {anime.map((item) => (
-                  <AnimeCard
-                    key={item.id}
-                    anime={item}
-                    saved={savedAnimeIds.includes(String(item.id))}
-                    saving={savingAnimeId === String(item.id)}
-                    onSave={handleSaveAnime}
-                  />
-                ))}
-              </div>
-
-              <div className="mt-10 flex items-center justify-center gap-4">
-                <button
-                  type="button"
-                  disabled={page <= 1 || loading}
-                  onClick={() => {
-                    setPage((current) => Math.max(1, current - 1));
-                    window.scrollTo({ top: 0, behavior: "smooth" });
-                  }}
-                  className="flex items-center gap-2 rounded-xl border border-white/10 px-4 py-3 text-sm font-semibold text-gray-300 transition hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-30"
-                >
-                  <ChevronLeft size={17} />
-                  Previous
-                </button>
-
-                <span className="rounded-xl bg-purple-500/10 px-4 py-3 text-sm font-bold text-purple-300">
-                  Page {page}
-                </span>
-
-                <button
-                  type="button"
-                  disabled={!hasNextPage || loading}
-                  onClick={() => {
-                    setPage((current) => current + 1);
-                    window.scrollTo({ top: 0, behavior: "smooth" });
-                  }}
-                  className="flex items-center gap-2 rounded-xl border border-white/10 px-4 py-3 text-sm font-semibold text-gray-300 transition hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-30"
-                >
-                  Next
-                  <ChevronRight size={17} />
-                </button>
-              </div>
-            </>
+            <div className="grid grid-cols-2 gap-x-3 gap-y-8 sm:grid-cols-3 sm:gap-x-5 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
+              {anime.map((item) => (
+                <AnimeCard
+                  key={item.id}
+                  anime={item}
+                  saved={savedAnimeIds.includes(String(item.id))}
+                  saving={savingAnimeId === String(item.id)}
+                  onSave={handleSaveAnime}
+                />
+              ))}
+            </div>
           )}
 
           {!loading && !error && anime.length === 0 && (
-            <div className="rounded-3xl border border-white/10 bg-[#12121c] px-5 py-16 text-center">
-              <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-purple-500/10 text-purple-300">
-                <Search size={28} />
-              </div>
-
-              <h3 className="mt-5 text-xl font-extrabold">
-                No anime found
-              </h3>
-
-              <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-gray-500">
-                Try another title or clear some filters to discover more anime.
-              </p>
-
-              <button
-                type="button"
-                onClick={clearFilters}
-                className="mt-5 rounded-xl bg-purple-600 px-5 py-3 text-sm font-bold transition hover:bg-purple-500"
-              >
-                Clear filters
-              </button>
-            </div>
+            <EmptyState onClear={clearFilters} />
           )}
         </section>
 
-        <div className="mt-12 flex items-center justify-center gap-2 text-xs text-gray-600">
-          <Sparkles size={14} />
-          Anime data powered by AniList
+        <div className="mt-16 flex flex-col items-center justify-center gap-3 border-t border-white/[0.06] pt-8 text-center">
+          <div className="flex items-center gap-2 text-orange-500">
+            <Clapperboard size={17} />
+            <span className="text-xs font-black tracking-[0.2em]">
+              ANIMEVAULT
+            </span>
+          </div>
+          <p className="text-[10px] text-gray-600">
+            Discover more. Save your favourites. Build your vault.
+          </p>
         </div>
       </div>
     </main>

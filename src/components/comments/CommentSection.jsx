@@ -227,15 +227,15 @@ export default function CommentSection({ shortId, onClose }) {
   return (
     <section
       aria-label="Short comments"
-      className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-white/10 bg-vault-surface text-vault-text"
+      className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-orange-500/20 bg-[#15110e] text-white shadow-xl shadow-black/20"
     >
-      <header className="flex shrink-0 items-center justify-between border-b border-white/10 p-4">
+      <header className="flex shrink-0 items-center justify-between border-b border-orange-500/20 bg-gradient-to-r from-orange-500/10 to-transparent p-4">
         <div className="flex items-center gap-2">
-          <MessageCircle size={20} className="text-vault-accent" />
+          <MessageCircle size={20} className="text-orange-400" />
 
-          <h2 className="font-semibold">Comments</h2>
+          <h2 className="font-bold">Comments</h2>
 
-          <span className="rounded-full bg-white/10 px-2 py-0.5 text-xs text-vault-muted">
+          <span className="rounded-full border border-orange-500/20 bg-orange-500/10 px-2 py-0.5 text-xs font-semibold text-orange-300">
             {comments.length}
           </span>
         </div>
@@ -245,7 +245,7 @@ export default function CommentSection({ shortId, onClose }) {
             type="button"
             onClick={onClose}
             aria-label="Close comments"
-            className="rounded-full p-2 text-vault-muted transition hover:bg-white/10 hover:text-vault-text"
+            className="rounded-full p-2 text-white/50 transition hover:bg-orange-500/15 hover:text-orange-400"
           >
             <X size={19} />
           </button>
@@ -260,7 +260,7 @@ export default function CommentSection({ shortId, onClose }) {
           <div className="flex justify-center py-10">
             <LoaderCircle
               size={25}
-              className="animate-spin text-vault-accent"
+              className="animate-spin text-orange-500"
             />
           </div>
         ) : error && comments.length === 0 ? (
@@ -270,26 +270,25 @@ export default function CommentSection({ shortId, onClose }) {
             <button
               type="button"
               onClick={loadComments}
-              className="rounded-lg bg-white/10 px-4 py-2 text-sm hover:bg-white/15"
+              className="rounded-lg border border-orange-500/30 bg-orange-500/10 px-4 py-2 text-sm font-semibold text-orange-300 transition hover:bg-orange-500/20"
             >
               Try again
             </button>
           </div>
         ) : comments.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-10 text-center">
-            <MessageCircle
-              size={34}
-              className="mb-3 text-vault-muted"
-            />
+            <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-full border border-orange-500/20 bg-orange-500/10">
+              <MessageCircle size={28} className="text-orange-400" />
+            </div>
 
-            <p className="font-medium">No comments yet</p>
+            <p className="font-semibold">No comments yet</p>
 
-            <p className="mt-1 text-sm text-vault-muted">
+            <p className="mt-1 text-sm text-white/45">
               Start the conversation about this Short.
             </p>
           </div>
         ) : (
-          <div className="divide-y divide-white/5">
+          <div className="divide-y divide-orange-500/10">
             {comments.map((comment) => (
               <CommentItem
                 key={comment.id}
@@ -307,7 +306,7 @@ export default function CommentSection({ shortId, onClose }) {
 
       <form
         onSubmit={submitComment}
-        className="shrink-0 border-t border-white/10 p-3"
+        className="shrink-0 border-t border-orange-500/20 bg-black/20 p-3"
       >
         {error && comments.length > 0 && (
           <p role="alert" className="mb-2 text-xs text-red-400">
@@ -316,13 +315,13 @@ export default function CommentSection({ shortId, onClose }) {
         )}
 
         {successMessage && (
-          <p role="status" className="mb-2 text-xs text-green-400">
+          <p role="status" className="mb-2 text-xs text-orange-400">
             {successMessage}
           </p>
         )}
 
         {!userId && (
-          <p className="mb-2 text-xs text-vault-muted">
+          <p className="mb-2 text-xs text-white/45">
             Sign in to join the conversation.
           </p>
         )}
@@ -352,14 +351,14 @@ export default function CommentSection({ shortId, onClose }) {
             rows={1}
             maxLength={MAX_COMMENT_LENGTH}
             disabled={!userId || submitting}
-            className="max-h-28 min-h-11 flex-1 resize-y rounded-xl border border-white/10 bg-black/20 px-3 py-3 text-sm text-vault-text outline-none placeholder:text-vault-muted focus:border-vault-purple disabled:cursor-not-allowed disabled:opacity-50"
+            className="max-h-28 min-h-11 flex-1 resize-y rounded-xl border border-orange-500/20 bg-[#0d0b09] px-3 py-3 text-sm text-white outline-none placeholder:text-white/30 focus:border-orange-500/70 focus:ring-2 focus:ring-orange-500/10 disabled:cursor-not-allowed disabled:opacity-50"
           />
 
           <button
             type="submit"
             disabled={!userId || !text.trim() || submitting}
             aria-label="Post comment"
-            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-vault-purple text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-orange-500 to-orange-600 text-white shadow-lg shadow-orange-500/20 transition hover:from-orange-400 hover:to-orange-500 disabled:cursor-not-allowed disabled:opacity-40"
           >
             {submitting ? (
               <LoaderCircle size={18} className="animate-spin" />
@@ -369,7 +368,7 @@ export default function CommentSection({ shortId, onClose }) {
           </button>
         </div>
 
-        <p className="mt-2 text-right text-[10px] text-vault-muted">
+        <p className="mt-2 text-right text-[10px] text-white/35">
           {text.length}/{MAX_COMMENT_LENGTH}
         </p>
       </form>

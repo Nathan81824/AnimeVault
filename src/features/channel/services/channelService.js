@@ -44,6 +44,9 @@ const getRowsByShortIds = async (
   creatorId = null,
 ) => {
   const rows = []
+
+  if (!shortIds.length) return rows
+
   let start = 0
 
   while (true) {
@@ -72,6 +75,30 @@ const getRowsByShortIds = async (
   return rows
 }
 
+const getPublishedShorts = async (client) => {
+  const shorts = []
+  let start = 0
+
+  while (true) {
+    const { data, error } = await client
+      .from(SHORTS_TABLE)
+      .select('id, user_id')
+      .eq('status', 'published')
+      .range(start, start + PAGE_SIZE - 1)
+
+    if (error) throw error
+
+    const batch = data || []
+    shorts.push(...batch)
+
+    if (batch.length < PAGE_SIZE) break
+
+    start += PAGE_SIZE
+  }
+
+  return shorts
+}
+
 const countByShortId = (rows) => {
   const counts = {}
 
@@ -87,16 +114,19 @@ const channelService = {
     try {
       const client = getClient()
 
-      const [profilesResult, subscriptionsResult] = await Promise.all([
-        client
-          .from('profiles')
-          .select('*')
-          .order('created_at', { ascending: false }),
+      const [profilesResult, subscriptionsResult, publishedShorts] =
+        await Promise.all([
+          client
+            .from('profiles')
+            .select('*')
+            .order('created_at', { ascending: false }),
 
-        client
-          .from(SUBSCRIPTIONS_TABLE)
-          .select('creator_id'),
-      ])
+          client
+            .from(SUBSCRIPTIONS_TABLE)
+            .select('creator_id'),
+
+          getPublishedShorts(client),
+        ])
 
       if (profilesResult.error) throw profilesResult.error
       if (subscriptionsResult.error) throw subscriptionsResult.error
@@ -105,8 +135,32 @@ const channelService = {
 
       ;(subscriptionsResult.data || []).forEach((subscription) => {
         const creatorId = subscription.creator_id
+
         subscriberCounts[creatorId] =
           (subscriberCounts[creatorId] || 0) + 1
+      })
+
+      const shortIds = publishedShorts
+        .map((short) => short.id)
+        .filter(Boolean)
+
+      const views = await getRowsByShortIds(
+        client,
+        VIEWS_TABLE,
+        shortIds,
+      )
+
+      const viewCounts = countByShortId(views)
+      const creatorViews = {}
+
+      publishedShorts.forEach((short) => {
+        const creatorId = short.user_id
+
+        if (!creatorId) return
+
+        creatorViews[creatorId] =
+          (creatorViews[creatorId] || 0) +
+          (viewCounts[short.id] || 0)
       })
 
       const channels = (profilesResult.data || []).map((profile) => ({
@@ -122,6 +176,8 @@ const channelService = {
         website: profile.website || '',
         createdAt: profile.created_at || null,
         subscriberCount: subscriberCounts[profile.id] || 0,
+        totalViews: creatorViews[profile.id] || 0,
+        viewCount: creatorViews[profile.id] || 0,
       }))
 
       return { data: channels, error: null }

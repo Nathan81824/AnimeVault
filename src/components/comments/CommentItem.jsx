@@ -137,7 +137,7 @@ export default function CommentItem({
   }
 
   const avatar = (
-    <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full bg-vault-purple/20 text-vault-accent">
+    <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full border border-orange-500/20 bg-orange-500/10 text-orange-400">
       {avatarUrl ? (
         <img
           src={avatarUrl}
@@ -156,12 +156,12 @@ export default function CommentItem({
   )
 
   return (
-    <article className="flex gap-3 py-3">
+    <article className="flex gap-3 border-b border-white/[0.04] py-3 last:border-0">
       {authorId ? (
         <Link
           to={`/profile/${authorId}`}
           aria-label={`View ${username}'s profile`}
-          className="shrink-0 rounded-full outline-none focus-visible:ring-2 focus-visible:ring-vault-accent"
+          className="shrink-0 rounded-full outline-none focus-visible:ring-2 focus-visible:ring-orange-400"
         >
           {avatar}
         </Link>
@@ -174,12 +174,12 @@ export default function CommentItem({
           {authorId ? (
             <Link
               to={`/profile/${authorId}`}
-              className="truncate text-sm font-semibold text-vault-text transition hover:text-vault-accent"
+              className="truncate text-sm font-semibold text-white transition hover:text-orange-400"
             >
               {username}
             </Link>
           ) : (
-            <span className="truncate text-sm font-semibold text-vault-text">
+            <span className="truncate text-sm font-semibold text-white">
               {username}
             </span>
           )}
@@ -188,14 +188,14 @@ export default function CommentItem({
             <time
               dateTime={createdAt.toISOString()}
               title={createdAt.toLocaleString()}
-              className="shrink-0 text-xs text-vault-muted"
+              className="shrink-0 text-xs text-gray-500"
             >
               {formatDate(comment.created_at)}
             </time>
           )}
         </div>
 
-        <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-6 text-vault-text">
+        <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-6 text-gray-300">
           {content}
         </p>
       </div>
@@ -216,7 +216,7 @@ export default function CommentItem({
             aria-expanded={showMenu}
             aria-haspopup="menu"
             disabled={isDeleting}
-            className="rounded-full p-1 text-vault-muted transition hover:bg-white/10 hover:text-vault-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-vault-accent disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded-full p-1.5 text-gray-500 transition hover:bg-orange-500/10 hover:text-orange-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-400 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {isDeleting ? (
               <LoaderCircle
@@ -231,14 +231,14 @@ export default function CommentItem({
           {showMenu && (
             <div
               role="menu"
-              className="absolute right-0 top-full z-20 mt-1 min-w-40 rounded-lg border border-white/10 bg-vault-surface p-1 shadow-xl"
+              className="absolute right-0 top-full z-20 mt-1 min-w-40 rounded-xl border border-white/10 bg-[#15151f] p-1 shadow-xl shadow-black/30"
             >
               <button
                 type="button"
                 role="menuitem"
                 onClick={handleDelete}
                 disabled={isDeleting}
-                className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-red-400 transition hover:bg-red-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400 disabled:cursor-not-allowed disabled:opacity-50"
+                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-red-400 transition hover:bg-red-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {isDeleting ? (
                   <LoaderCircle

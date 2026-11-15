@@ -17,6 +17,8 @@ import {
   ChevronDown,
 } from 'lucide-react'
 
+const VIEW_THRESHOLD = 3000
+
 function getYouTubeVideoId(value) {
   if (!value) return null
 
@@ -28,9 +30,7 @@ function getYouTubeVideoId(value) {
     if (host === 'youtu.be') return parts[0] || null
 
     if (
-      host === 'youtube.com' ||
-      host === 'm.youtube.com' ||
-      host === 'youtube-nocookie.com'
+      ['youtube.com', 'm.youtube.com', 'youtube-nocookie.com'].includes(host)
     ) {
       if (parts[0] === 'watch') return url.searchParams.get('v')
       if (['shorts', 'embed', 'live'].includes(parts[0])) {
@@ -47,27 +47,27 @@ function getYouTubeVideoId(value) {
 function formatCount(value) {
   const count = Number(value) || 0
 
-  if (count >= 1_000_000) {
-    return `${(count / 1_000_000).toFixed(1).replace(/\.0$/, '')}M`
+  if (count >= 1000000) {
+    return `${(count / 1000000).toFixed(1).replace(/\.0$/, '')}M`
   }
 
-  if (count >= 1_000) {
-    return `${(count / 1_000).toFixed(1).replace(/\.0$/, '')}K`
+  if (count >= 1000) {
+    return `${(count / 1000).toFixed(1).replace(/\.0$/, '')}K`
   }
 
   return String(count)
 }
 
-function sendYouTubeCommand(iframe, command) {
+function sendYouTubeCommand(iframe, command, args = []) {
   if (!iframe?.contentWindow) return
 
   iframe.contentWindow.postMessage(
     JSON.stringify({
       event: 'command',
       func: command,
-      args: [],
+      args,
     }),
-    '*',
+    'https://www.youtube-nocookie.com',
   )
 }
 
@@ -110,22 +110,32 @@ export default function ShortCard({
   const articleRef = useRef(null)
   const videoRef = useRef(null)
   const iframeRef = useRef(null)
+
   const viewRecordedRef = useRef(false)
+  const watchedMsRef = useRef(0)
+  const watchStartedAtRef = useRef(null)
+  const watchTimerRef = useRef(null)
+
   const heartTimerRef = useRef(null)
   const playButtonTimerRef = useRef(null)
+  const manualPauseRef = useRef(false)
 
   const [aspectRatio, setAspectRatio] = useState(9 / 16)
   const [playing, setPlaying] = useState(false)
   const [videoError, setVideoError] = useState(false)
   const [compactActions, setCompactActions] = useState(false)
+
   const [localLiked, setLocalLiked] = useState(isLiked)
   const [localSaved, setLocalSaved] = useState(isSaved)
+
   const [localLikes, setLocalLikes] = useState(
     Number(item.like_count ?? item.likeCount ?? item.likes ?? 0),
   )
+
   const [localViews, setLocalViews] = useState(
     Number(item.view_count ?? item.viewCount ?? item.views ?? 0),
   )
+
   const [showHeart, setShowHeart] = useState(false)
   const [likeBusy, setLikeBusy] = useState(false)
   const [saveBusy, setSaveBusy] = useState(false)
@@ -173,9 +183,7 @@ export default function ShortCard({
     username ||
     'Anime fan'
 
-  const creatorLabel = username
-    ? `@${username}`
-    : displayName
+  const creatorLabel = username ? `@${username}` : displayName
 
   const avatar =
     profile.avatar_url ||
@@ -185,16 +193,96 @@ export default function ShortCard({
     item.user?.user_metadata?.avatar_url ||
     ''
 
-  const channelLink = creatorId
-    ? `/channel/${creatorId}`
-    : null
+  const channelLink = creatorId ? `/channel/${creatorId}` : null
 
   const youtubeId = getYouTubeVideoId(videoUrl)
   const isYouTube = Boolean(youtubeId)
 
   const youtubeEmbedUrl = isYouTube
-    ? `https://www.youtube-nocookie.com/embed/${youtubeId}?playsinline=1&controls=0&rel=0&enablejsapi=1&autoplay=${isActive ? 1 : 0}&mute=${muted ? 1 : 0}`
+    ? `https://www.youtube-nocookie.com/embed/${youtubeId}?playsinline=1&controls=0&rel=0&enablejsapi=1&autoplay=${isActive ? 1 : 0}&loop=1&playlist=${youtubeId}&origin=${encodeURIComponent(window.location.origin)}&modestbranding=1&iv_load_policy=3`
     : ''
+
+  const stopWatchTimer = useCallback(() => {
+    if (watchTimerRef.current) {
+      window.clearTimeout(watchTimerRef.current)
+      watchTimerRef.current = null
+    }
+
+    if (watchStartedAtRef.current !== null) {
+      watchedMsRef.current += Date.now() - watchStartedAtRef.current
+      watchStartedAtRef.current = null
+    }
+  }, [])
+
+  const recordQualifiedView = useCallback(async () => {
+    if (
+      viewRecordedRef.current ||
+      !shortId ||
+      !isActive ||
+      !onView
+    ) {
+      return
+    }
+
+    viewRecordedRef.current = true
+
+    try {
+      const result = await onView(shortId)
+
+      if (result?.success === false) {
+        throw new Error(result.error || 'Could not record this view.')
+      }
+
+      setLocalViews((count) => count + 1)
+    } catch (error) {
+      viewRecordedRef.current = false
+      console.error('Could not record Short view:', error)
+    }
+  }, [shortId, isActive, onView])
+
+  const startWatchTimer = useCallback(() => {
+    if (
+      !isActive ||
+      viewRecordedRef.current ||
+      watchStartedAtRef.current !== null
+    ) {
+      return
+    }
+
+    const remaining = Math.max(
+      0,
+      VIEW_THRESHOLD - watchedMsRef.current,
+    )
+
+    watchStartedAtRef.current = Date.now()
+
+    watchTimerRef.current = window.setTimeout(() => {
+      stopWatchTimer()
+      recordQualifiedView()
+    }, remaining)
+  }, [isActive, recordQualifiedView, stopWatchTimer])
+
+  const resetWatchSession = useCallback(() => {
+    stopWatchTimer()
+    watchedMsRef.current = 0
+    viewRecordedRef.current = false
+  }, [stopWatchTimer])
+
+  const revealPlayButton = useCallback(() => {
+    setShowPlayButton(true)
+
+    if (playButtonTimerRef.current) {
+      window.clearTimeout(playButtonTimerRef.current)
+      playButtonTimerRef.current = null
+    }
+
+    if (playing) {
+      playButtonTimerRef.current = window.setTimeout(() => {
+        setShowPlayButton(false)
+        playButtonTimerRef.current = null
+      }, 900)
+    }
+  }, [playing])
 
   useEffect(() => {
     setLocalLiked(isLiked)
@@ -235,12 +323,10 @@ export default function ShortCard({
     if (typeof ResizeObserver !== 'undefined') {
       const observer = new ResizeObserver(updateLayout)
       observer.observe(element)
-
       return () => observer.disconnect()
     }
 
     window.addEventListener('resize', updateLayout)
-
     return () => window.removeEventListener('resize', updateLayout)
   }, [])
 
@@ -250,11 +336,26 @@ export default function ShortCard({
     setPlaying(false)
     setShowHeart(false)
     setShowPlayButton(true)
-    viewRecordedRef.current = false
-  }, [videoUrl])
+    manualPauseRef.current = false
+
+    resetWatchSession()
+
+    return () => stopWatchTimer()
+  }, [videoUrl, shortId, resetWatchSession, stopWatchTimer])
+
+  useEffect(() => {
+    if (!isActive) {
+      manualPauseRef.current = false
+      resetWatchSession()
+      setPlaying(false)
+      setShowPlayButton(true)
+    }
+  }, [isActive, resetWatchSession])
 
   useEffect(() => {
     return () => {
+      stopWatchTimer()
+
       if (heartTimerRef.current) {
         window.clearTimeout(heartTimerRef.current)
       }
@@ -263,80 +364,132 @@ export default function ShortCard({
         window.clearTimeout(playButtonTimerRef.current)
       }
     }
-  }, [])
+  }, [stopWatchTimer])
 
-  const handleView = useCallback(() => {
-    if (viewRecordedRef.current || !shortId) return
+  useEffect(() => {
+    if (!playing || !isActive) {
+      setShowPlayButton(true)
 
-    viewRecordedRef.current = true
-    setLocalViews((count) => count + 1)
+      if (playButtonTimerRef.current) {
+        window.clearTimeout(playButtonTimerRef.current)
+        playButtonTimerRef.current = null
+      }
 
-    Promise.resolve(onView?.(shortId)).catch((error) => {
-      console.error('Could not record Short view:', error)
-    })
-  }, [shortId, onView])
-
-  const revealPlayButton = useCallback(() => {
-    setShowPlayButton(true)
-
-    if (playButtonTimerRef.current) {
-      window.clearTimeout(playButtonTimerRef.current)
+      return
     }
 
-    if (playing) {
-      playButtonTimerRef.current = window.setTimeout(() => {
-        setShowPlayButton(false)
-      }, 1800)
-    }
-  }, [playing])
+    setShowPlayButton(false)
 
+    return () => {
+      if (playButtonTimerRef.current) {
+        window.clearTimeout(playButtonTimerRef.current)
+        playButtonTimerRef.current = null
+      }
+    }
+  }, [playing, isActive])
+
+  useEffect(() => {
+    const handleMessage = (event) => {
+      const iframe = iframeRef.current
+
+      if (!iframe || event.source !== iframe.contentWindow) return
+
+      if (
+        event.origin !== 'https://www.youtube-nocookie.com' &&
+        event.origin !== 'https://www.youtube.com'
+      ) {
+        return
+      }
+
+      let payload
+
+      try {
+        payload =
+          typeof event.data === 'string'
+            ? JSON.parse(event.data)
+            : event.data
+      } catch {
+        return
+      }
+
+      let state
+
+      if (payload?.event === 'onStateChange') {
+        state = payload.info
+      } else if (
+        payload?.event === 'infoDelivery' &&
+        payload?.info &&
+        Object.prototype.hasOwnProperty.call(
+          payload.info,
+          'playerState',
+        )
+      ) {
+        state = payload.info.playerState
+      }
+
+      if (typeof state !== 'number') return
+
+      if (state === 1) {
+        if (isActive && !manualPauseRef.current) {
+          setPlaying(true)
+          startWatchTimer()
+        }
+      } else if (state === 2 || state === 0 || state === -1) {
+        setPlaying(false)
+        stopWatchTimer()
+      } else if (state === 3) {
+        stopWatchTimer()
+      }
+    }
+
+    window.addEventListener('message', handleMessage)
+    return () => window.removeEventListener('message', handleMessage)
+  }, [isActive, startWatchTimer, stopWatchTimer])
+
+  // Playback activation is separate from mute changes.
+  // Changing muted will never call play() or reload the player.
   useEffect(() => {
     const element = videoRef.current
 
     if (element) {
-      element.muted = muted
-
       if (!isActive) {
         element.pause()
-        setPlaying(false)
       } else if (videoUrl && !isYouTube && !videoError) {
-        element.play().catch((error) => {
-          setPlaying(false)
+        if (!manualPauseRef.current && element.paused) {
+          element.play().catch((error) => {
+            setPlaying(false)
+            stopWatchTimer()
 
-          if (error?.name !== 'AbortError') {
-            console.info('Autoplay was blocked by the browser.')
-          }
-        })
+            if (error?.name !== 'AbortError') {
+              console.info('Autoplay was blocked by the browser.')
+            }
+          })
+        }
       }
     }
 
     if (isYouTube && iframeRef.current) {
       if (!isActive) {
         sendYouTubeCommand(iframeRef.current, 'pauseVideo')
-        setPlaying(false)
-      } else {
-        sendYouTubeCommand(
-          iframeRef.current,
-          muted ? 'mute' : 'unMute',
-        )
-
+      } else if (!manualPauseRef.current) {
         sendYouTubeCommand(iframeRef.current, 'playVideo')
-        handleView()
       }
     }
-  }, [isActive, videoUrl, isYouTube, videoError, muted, handleView])
+  }, [isActive, videoUrl, isYouTube, videoError, stopWatchTimer])
 
+  // Native video mute changes do not restart playback.
   useEffect(() => {
-    if (playing && isActive) {
-      revealPlayButton()
-    } else {
-      setShowPlayButton(true)
-
-      if (playButtonTimerRef.current) {
-        window.clearTimeout(playButtonTimerRef.current)
-      }
+    if (videoRef.current) {
+      videoRef.current.muted = muted
     }
-  }, [playing, isActive, revealPlayButton])
+
+    if (isYouTube && iframeRef.current) {
+      sendYouTubeCommand(
+        iframeRef.current,
+        muted ? 'mute' : 'unMute',
+      )
+    }
+  }, [muted, isYouTube])
 
   const handleMetadata = (event) => {
     const element = event.currentTarget
@@ -349,16 +502,16 @@ export default function ShortCard({
   const handleTogglePlayback = () => {
     if (!isActive) return
 
-    revealPlayButton()
-
     if (isYouTube) {
       if (playing) {
-        sendYouTubeCommand(iframeRef.current, 'pauseVideo')
+        manualPauseRef.current = true
         setPlaying(false)
+        setShowPlayButton(true)
+        stopWatchTimer()
+        sendYouTubeCommand(iframeRef.current, 'pauseVideo')
       } else {
+        manualPauseRef.current = false
         sendYouTubeCommand(iframeRef.current, 'playVideo')
-        setPlaying(true)
-        handleView()
       }
 
       return
@@ -368,10 +521,13 @@ export default function ShortCard({
     if (!element) return
 
     if (element.paused) {
+      manualPauseRef.current = false
+
       element.play().catch((error) => {
         console.error('Could not play video:', error)
       })
     } else {
+      manualPauseRef.current = true
       element.pause()
     }
   }
@@ -389,26 +545,27 @@ export default function ShortCard({
 
     setLikeBusy(true)
     setLocalLiked(nextLiked)
-
-    setLocalLikes((count) =>
-      Math.max(0, count + (nextLiked ? 1 : -1)),
-    )
+    setLocalLikes((count) => Math.max(0, count + (nextLiked ? 1 : -1)))
 
     try {
-      const result = nextLiked
-        ? await onLike?.(shortId)
-        : await onUnlike?.(shortId)
+      const callback = nextLiked ? onLike : onUnlike
+
+      if (!callback) {
+        throw new Error('Like feature is not connected yet.')
+      }
+
+      const result = await callback(shortId)
 
       if (result?.success === false) {
         throw new Error(result.error || 'Could not update like.')
       }
     } catch (error) {
       setLocalLiked(wasLiked)
-
       setLocalLikes((count) =>
         Math.max(0, count + (wasLiked ? 1 : -1)),
       )
 
+      setActionMessage(error.message || 'Could not update like.')
       console.error('Could not update Short like:', error)
     } finally {
       setLikeBusy(false)
@@ -420,9 +577,7 @@ export default function ShortCard({
 
     setShowHeart(true)
 
-    if (!localLiked) {
-      handleLike()
-    }
+    if (!localLiked) handleLike()
 
     if (heartTimerRef.current) {
       window.clearTimeout(heartTimerRef.current)
@@ -464,10 +619,48 @@ export default function ShortCard({
   const handleVideoError = () => {
     setVideoError(true)
     setPlaying(false)
+    setShowPlayButton(true)
+    stopWatchTimer()
+  }
+
+  const handleVideoPlaying = () => {
+    if (!isActive) {
+      videoRef.current?.pause()
+      return
+    }
+
+    setPlaying(true)
+    startWatchTimer()
+  }
+
+  const handleVideoWaiting = () => {
+    setPlaying(false)
+    stopWatchTimer()
+  }
+
+  const handleVideoPause = () => {
+    setPlaying(false)
+    setShowPlayButton(true)
+    stopWatchTimer()
+  }
+
+  const handleVideoEnded = () => {
+    const element = videoRef.current
+
+    if (!element || !isActive || manualPauseRef.current) return
+
+    element.currentTime = 0
+    element.play().catch((error) => {
+      setPlaying(false)
+
+      if (error?.name !== 'AbortError') {
+        console.info('Could not restart the Short automatically.')
+      }
+    })
   }
 
   const CreatorAvatar = () => (
-    <span className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full border border-purple-400/40 bg-purple-900 text-purple-200">
+    <span className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full border border-orange-500/40 bg-orange-950 text-orange-200">
       {avatar ? (
         <img
           src={avatar}
@@ -486,19 +679,11 @@ export default function ShortCard({
 
   const CreatorLink = ({ children, className = '', label }) => {
     if (!channelLink) {
-      return (
-        <span className={className} aria-label={label}>
-          {children}
-        </span>
-      )
+      return <span className={className} aria-label={label}>{children}</span>
     }
 
     return (
-      <Link
-        to={channelLink}
-        aria-label={label}
-        className={className}
-      >
+      <Link to={channelLink} aria-label={label} className={className}>
         {children}
       </Link>
     )
@@ -514,12 +699,12 @@ export default function ShortCard({
         <>
           <CreatorLink
             label={`View ${displayName}'s channel`}
-            className="rounded-full focus:outline-none focus:ring-2 focus:ring-purple-400"
+            className="rounded-full focus:outline-none focus:ring-2 focus:ring-orange-400"
           >
             <CreatorAvatar />
           </CreatorLink>
 
-          <span className="max-w-[90px] truncate text-center text-[10px] font-semibold text-purple-200">
+          <span className="max-w-[90px] truncate text-center text-[10px] font-semibold text-orange-200">
             {creatorLabel}
           </span>
         </>
@@ -532,25 +717,17 @@ export default function ShortCard({
         aria-label={localLiked ? 'Unlike Short' : 'Like Short'}
         aria-pressed={localLiked}
         className={`flex flex-col items-center gap-1 transition hover:scale-105 ${
-          localLiked
-            ? 'text-pink-400'
-            : 'text-white hover:text-pink-300'
+          localLiked ? 'text-pink-400' : 'text-white hover:text-pink-300'
         }`}
       >
-        <span className="flex h-10 w-10 items-center justify-center rounded-full border border-purple-400/30 bg-purple-950/90">
+        <span className="flex h-10 w-10 items-center justify-center rounded-full border border-orange-500/35 bg-neutral-950">
           {likeBusy ? (
             <LoaderCircle size={21} className="animate-spin" />
           ) : (
-            <Heart
-              size={22}
-              fill={localLiked ? 'currentColor' : 'none'}
-            />
+            <Heart size={22} fill={localLiked ? 'currentColor' : 'none'} />
           )}
         </span>
-
-        <span className="text-[11px] font-semibold">
-          {formatCount(localLikes)}
-        </span>
+        <span className="text-[11px] font-semibold">{formatCount(localLikes)}</span>
       </button>
 
       <button
@@ -559,19 +736,14 @@ export default function ShortCard({
         aria-label="Open comments"
         aria-expanded={commentsOpen}
         className={`flex flex-col items-center gap-1 transition hover:scale-105 ${
-          commentsOpen
-            ? 'text-purple-300'
-            : 'text-white hover:text-purple-300'
+          commentsOpen ? 'text-orange-300' : 'text-white hover:text-orange-300'
         }`}
       >
-        <span className="flex h-10 w-10 items-center justify-center rounded-full border border-purple-400/30 bg-purple-950/90">
+        <span className="flex h-10 w-10 items-center justify-center rounded-full border border-orange-500/35 bg-neutral-950">
           <MessageCircle size={22} />
         </span>
-
         <span className="text-[11px] font-semibold">
-          {formatCount(
-            item.comment_count ?? item.commentCount ?? 0,
-          )}
+          {formatCount(item.comment_count ?? item.commentCount ?? 0)}
         </span>
       </button>
 
@@ -582,12 +754,10 @@ export default function ShortCard({
         aria-label={localSaved ? 'Saved to My Vault' : 'Save to My Vault'}
         aria-pressed={localSaved}
         className={`flex flex-col items-center gap-1 transition hover:scale-105 ${
-          localSaved
-            ? 'text-purple-300'
-            : 'text-white hover:text-purple-300'
+          localSaved ? 'text-orange-300' : 'text-white hover:text-orange-300'
         }`}
       >
-        <span className="flex h-10 w-10 items-center justify-center rounded-full border border-purple-400/30 bg-purple-950/90">
+        <span className="flex h-10 w-10 items-center justify-center rounded-full border border-orange-500/35 bg-neutral-950">
           {saveBusy ? (
             <LoaderCircle size={21} className="animate-spin" />
           ) : localSaved ? (
@@ -596,20 +766,16 @@ export default function ShortCard({
             <Bookmark size={22} />
           )}
         </span>
-
         <span className="text-[11px] font-semibold">
           {saveBusy ? 'Saving' : localSaved ? 'Saved' : 'Save'}
         </span>
       </button>
 
       <div className="flex flex-col items-center gap-1 text-white">
-        <span className="flex h-10 w-10 items-center justify-center rounded-full border border-purple-400/30 bg-purple-950/90">
+        <span className="flex h-10 w-10 items-center justify-center rounded-full border border-orange-500/35 bg-neutral-950">
           <Eye size={21} />
         </span>
-
-        <span className="text-[11px] font-semibold">
-          {formatCount(localViews)}
-        </span>
+        <span className="text-[11px] font-semibold">{formatCount(localViews)}</span>
       </div>
     </aside>
   )
@@ -626,7 +792,7 @@ export default function ShortCard({
         disabled={!canGoPrevious}
         aria-label="Previous Short"
         title="Previous Short"
-        className="flex h-10 w-10 items-center justify-center rounded-full border border-white/25 bg-transparent text-white transition hover:scale-105 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-30"
+        className="flex h-10 w-10 items-center justify-center rounded-full border border-orange-500/35 bg-neutral-950 text-white transition hover:scale-105 hover:bg-orange-500/20 disabled:cursor-not-allowed disabled:opacity-30"
       >
         <ChevronUp size={22} />
       </button>
@@ -636,7 +802,7 @@ export default function ShortCard({
         onClick={onNext}
         aria-label="Next Short"
         title="Next Short"
-        className="flex h-10 w-10 items-center justify-center rounded-full border border-white/25 bg-transparent text-white transition hover:scale-105 hover:bg-white/10"
+        className="flex h-10 w-10 items-center justify-center rounded-full border border-orange-500/35 bg-neutral-950 text-white transition hover:scale-105 hover:bg-orange-500/20"
       >
         <ChevronDown size={22} />
       </button>
@@ -660,7 +826,7 @@ export default function ShortCard({
         onDoubleClick={handleDoubleClick}
         onMouseMove={revealPlayButton}
         onTouchStart={revealPlayButton}
-        className="group relative flex shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-purple-400/30 bg-gradient-to-br from-purple-950 via-violet-950 to-purple-900 ring-1 ring-inset ring-purple-400/10"
+        className="group relative flex shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-orange-500/35 bg-black ring-1 ring-inset ring-orange-500/10"
         style={{
           width: `min(100%, calc(78dvh * ${safeRatio}))`,
           aspectRatio: String(safeRatio),
@@ -668,8 +834,6 @@ export default function ShortCard({
           maxHeight: '78dvh',
         }}
       >
-        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(168,85,247,0.18),transparent_70%)]" />
-
         {!isYouTube && videoUrl && !videoError && (
           <video
             ref={videoRef}
@@ -681,12 +845,13 @@ export default function ShortCard({
             muted={muted}
             controls={false}
             disablePictureInPicture
+            controlsList="nodownload noplaybackrate noremoteplayback"
             onLoadedMetadata={handleMetadata}
-            onPlay={() => {
-              setPlaying(true)
-              handleView()
-            }}
-            onPause={() => setPlaying(false)}
+            onPlaying={handleVideoPlaying}
+            onWaiting={handleVideoWaiting}
+            onStalled={handleVideoWaiting}
+            onPause={handleVideoPause}
+            onEnded={handleVideoEnded}
             onError={handleVideoError}
             aria-label={title}
             className="absolute inset-0 z-10 h-full w-full cursor-pointer object-contain"
@@ -698,17 +863,23 @@ export default function ShortCard({
             ref={iframeRef}
             src={youtubeEmbedUrl}
             title={title}
-            className="pointer-events-none absolute inset-0 z-10 h-full w-full border-0 bg-transparent"
+            className="pointer-events-none absolute inset-0 z-10 h-full w-full border-0 bg-black"
             allow="autoplay; encrypted-media; fullscreen"
             allowFullScreen
             onLoad={() => {
-              if (isActive) {
-                sendYouTubeCommand(
-                  iframeRef.current,
-                  muted ? 'mute' : 'unMute',
-                )
+              sendYouTubeCommand(
+                iframeRef.current,
+                'addEventListener',
+                ['onStateChange'],
+              )
+
+              sendYouTubeCommand(
+                iframeRef.current,
+                muted ? 'mute' : 'unMute',
+              )
+
+              if (isActive && !manualPauseRef.current) {
                 sendYouTubeCommand(iframeRef.current, 'playVideo')
-                handleView()
               }
             }}
           />
@@ -716,12 +887,9 @@ export default function ShortCard({
 
         {(!videoUrl || videoError) && (
           <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 p-5 text-center">
-            <Play size={38} className="text-purple-200" />
-
-            <p className="text-sm text-purple-100">
-              {videoError
-                ? 'This video could not be played.'
-                : 'No video available.'}
+            <Play size={38} className="text-orange-300" />
+            <p className="text-sm text-orange-100">
+              {videoError ? 'This video could not be played.' : 'No video available.'}
             </p>
 
             {videoUrl && (
@@ -730,7 +898,7 @@ export default function ShortCard({
                 target="_blank"
                 rel="noreferrer"
                 onClick={(event) => event.stopPropagation()}
-                className="rounded-full bg-purple-600 px-4 py-2 text-xs font-semibold text-white hover:bg-purple-500"
+                className="rounded-full bg-orange-600 px-4 py-2 text-xs font-semibold text-white hover:bg-orange-500"
               >
                 Open video
               </a>
@@ -738,7 +906,7 @@ export default function ShortCard({
           </div>
         )}
 
-        <div className="pointer-events-none absolute left-3 top-3 z-20 max-w-[75%] rounded-full border border-purple-300/20 bg-black/50 px-3 py-2 text-xs font-semibold text-purple-100 backdrop-blur-md">
+        <div className="pointer-events-none absolute left-3 top-3 z-20 max-w-[75%] rounded-full border border-orange-400/25 bg-black/70 px-3 py-2 text-xs font-semibold text-orange-100 backdrop-blur-md">
           Anime Vault Shorts
         </div>
 
@@ -750,7 +918,7 @@ export default function ShortCard({
           }}
           aria-label={muted ? 'Unmute video' : 'Mute video'}
           aria-pressed={!muted}
-          className="absolute right-3 top-3 z-30 flex h-10 w-10 items-center justify-center rounded-full border border-white/20 bg-black/60 text-white backdrop-blur-md transition hover:bg-purple-700"
+          className="absolute right-3 top-3 z-30 flex h-10 w-10 items-center justify-center rounded-full border border-orange-400/30 bg-black/75 text-white backdrop-blur-md transition hover:bg-orange-600"
         >
           {muted ? <VolumeX size={20} /> : <Volume2 size={20} />}
         </button>
@@ -764,9 +932,9 @@ export default function ShortCard({
             }}
             aria-label={playing ? 'Pause video' : 'Play video'}
             aria-pressed={playing}
-            className={`absolute left-1/2 top-1/2 z-30 flex h-14 w-14 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-white/30 bg-black/65 text-white shadow-lg backdrop-blur-md transition-all duration-300 hover:scale-110 hover:bg-purple-700 ${
+            className={`absolute left-1/2 top-1/2 z-30 flex h-14 w-14 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-orange-400/45 bg-black/75 text-white shadow-lg backdrop-blur-md transition-all duration-300 hover:scale-110 hover:bg-orange-600 ${
               showPlayButton
-                ? 'scale-100 opacity-100'
+                ? 'pointer-events-auto scale-100 opacity-100'
                 : 'pointer-events-none scale-90 opacity-0'
             }`}
           >
@@ -795,19 +963,14 @@ export default function ShortCard({
           <div className="pointer-events-auto mb-3 flex min-w-0 items-center gap-2">
             <CreatorLink
               label={`View ${displayName}'s channel`}
-              className="shrink-0 rounded-full focus:outline-none focus:ring-2 focus:ring-purple-400"
+              className="shrink-0 rounded-full focus:outline-none focus:ring-2 focus:ring-orange-400"
             >
               <CreatorAvatar />
             </CreatorLink>
 
             <div className="min-w-0">
-              <p className="truncate text-xs font-bold text-white">
-                {displayName}
-              </p>
-
-              <p className="truncate text-[10px] text-purple-200">
-                {creatorLabel}
-              </p>
+              <p className="truncate text-xs font-bold text-white">{displayName}</p>
+              <p className="truncate text-[10px] text-orange-200">{creatorLabel}</p>
             </div>
           </div>
 
@@ -822,7 +985,7 @@ export default function ShortCard({
           )}
 
           {actionMessage && (
-            <p className="mt-2 text-[10px] font-medium text-purple-200">
+            <p className="mt-2 text-[10px] font-medium text-orange-200">
               {actionMessage}
             </p>
           )}

@@ -668,16 +668,22 @@ const shortService = {
 
       requireId(id, 'Short ID')
 
-      const { error } = await client
+      const { data, error } = await client
         .from(VIEWS_TABLE)
         .insert({
           short_id: id,
           user_id: user.id,
+          viewer_id: user.id,
         })
+        .select('id, short_id, user_id, created_at')
+        .single()
 
-      if (error && error.code !== '23505') throw error
+      if (error) throw error
 
-      return { success: true }
+      return {
+        success: true,
+        view: data,
+      }
     } catch (error) {
       return {
         success: false,

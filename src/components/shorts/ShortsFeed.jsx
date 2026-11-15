@@ -1,6 +1,6 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
 import {
   PlaySquare,
   RefreshCw,
@@ -16,6 +16,9 @@ import ShortCard from '../../components/shorts/ShortCard'
 import { useShortStore } from './shortsStore'
 
 export default function ShortsFeed() {
+  const { shortId: routeShortId, id: routeId } = useParams()
+  const requestedShortId = routeShortId || routeId
+
   const shorts = useShortStore((state) => state.shorts)
   const isLoading = useShortStore((state) => state.isLoading)
   const error = useShortStore((state) => state.error)
@@ -32,6 +35,7 @@ export default function ShortsFeed() {
   const wheelLockedRef = useRef(false)
   const wheelTimerRef = useRef(null)
   const touchStartRef = useRef(null)
+  const navigationTargetRef = useRef(null)
 
   const loadFeed = useCallback(
     async (isRefresh = false) => {
@@ -43,13 +47,13 @@ export default function ShortsFeed() {
         await fetchShorts()
       } catch (err) {
         setLoadError(
-          err?.message || 'Could not load Shorts. Please try again.'
+          err?.message || 'Could not load Shorts. Please try again.',
         )
       } finally {
         setRefreshing(false)
       }
     },
-    [fetchShorts]
+    [fetchShorts],
   )
 
   useEffect(() => {
@@ -57,7 +61,7 @@ export default function ShortsFeed() {
   }, [loadFeed])
 
   const publishedShorts = (shorts ?? []).filter(
-    (short) => short && short.status === 'published'
+    (short) => short && short.status === 'published',
   )
 
   const showLoading = isLoading && publishedShorts.length === 0
@@ -68,10 +72,11 @@ export default function ShortsFeed() {
 
       const nextIndex = Math.max(
         0,
-        Math.min(index, publishedShorts.length - 1)
+        Math.min(index, publishedShorts.length - 1),
       )
 
       activeIndexRef.current = nextIndex
+      navigationTargetRef.current = nextIndex
       setActiveIndex(nextIndex)
 
       const slide = slideRefs.current[nextIndex]
@@ -83,9 +88,27 @@ export default function ShortsFeed() {
         top: slide.offsetTop - feed.offsetTop,
         behavior: 'smooth',
       })
+
+      window.setTimeout(() => {
+        if (navigationTargetRef.current === nextIndex) {
+          navigationTargetRef.current = null
+        }
+      }, 700)
     },
-    [publishedShorts.length]
+    [publishedShorts.length],
   )
+
+  useEffect(() => {
+    if (!publishedShorts.length) return
+
+    const targetIndex = requestedShortId
+      ? publishedShorts.findIndex(
+          (short) => String(short.id) === String(requestedShortId),
+        )
+      : 0
+
+    goToShort(targetIndex >= 0 ? targetIndex : 0)
+  }, [shorts, requestedShortId, goToShort])
 
   useEffect(() => {
     const feed = feedRef.current
@@ -99,24 +122,26 @@ export default function ShortsFeed() {
         const visibleSlides = entries
           .filter((entry) => entry.isIntersecting)
           .sort(
-            (a, b) => b.intersectionRatio - a.intersectionRatio
+            (a, b) => b.intersectionRatio - a.intersectionRatio,
           )
 
         if (!visibleSlides.length) return
 
         const index = Number(
-          visibleSlides[0].target.dataset.shortIndex
+          visibleSlides[0].target.dataset.shortIndex,
         )
 
-        if (!Number.isNaN(index)) {
-          activeIndexRef.current = index
-          setActiveIndex(index)
-        }
+        if (Number.isNaN(index)) return
+
+        if (navigationTargetRef.current !== null) return
+
+        activeIndexRef.current = index
+        setActiveIndex(index)
       },
       {
         root: feed,
         threshold: [0.25, 0.5, 0.65, 0.85],
-      }
+      },
     )
 
     slides.forEach((slide) => observer.observe(slide))
@@ -125,19 +150,9 @@ export default function ShortsFeed() {
   }, [publishedShorts.length])
 
   useEffect(() => {
-    activeIndexRef.current = 0
-    setActiveIndex(0)
-    slideRefs.current = []
-
-    if (feedRef.current) {
-      feedRef.current.scrollTop = 0
-    }
-  }, [publishedShorts.length])
-
-  useEffect(() => {
     return () => {
       if (wheelTimerRef.current) {
-        clearTimeout(wheelTimerRef.current)
+        window.clearTimeout(wheelTimerRef.current)
       }
     }
   }, [])
@@ -152,7 +167,7 @@ export default function ShortsFeed() {
     wheelLockedRef.current = true
 
     goToShort(
-      activeIndexRef.current + (event.deltaY > 0 ? 1 : -1)
+      activeIndexRef.current + (event.deltaY > 0 ? 1 : -1),
     )
 
     wheelTimerRef.current = window.setTimeout(() => {
@@ -182,7 +197,7 @@ export default function ShortsFeed() {
     if (Math.abs(deltaX) > Math.abs(deltaY)) return
 
     goToShort(
-      activeIndexRef.current + (deltaY < 0 ? 1 : -1)
+      activeIndexRef.current + (deltaY < 0 ? 1 : -1),
     )
   }
 
@@ -190,7 +205,7 @@ export default function ShortsFeed() {
     if (
       event.target instanceof HTMLElement &&
       ['BUTTON', 'INPUT', 'TEXTAREA', 'SELECT'].includes(
-        event.target.tagName
+        event.target.tagName,
       )
     ) {
       return
@@ -208,19 +223,19 @@ export default function ShortsFeed() {
   }
 
   return (
-    <main className="min-w-0 flex-1 space-y-5 p-3 sm:p-5 lg:p-6">
+    <main className="min-w-0 flex-1 space-y-5 bg-[#080808] p-3 text-white sm:p-5 lg:p-6">
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
-          <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-vault-purple/20 text-vault-accent">
+          <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-orange-500/15 bg-orange-500/10 text-orange-400">
             <PlaySquare size={24} />
           </div>
 
           <div>
-            <h1 className="text-2xl font-black tracking-tight text-vault-text">
+            <h1 className="text-2xl font-black tracking-tight text-white">
               Anime Shorts
             </h1>
 
-            <p className="mt-1 text-sm text-vault-muted">
+            <p className="mt-1 text-sm text-gray-500">
               Swipe to discover your next anime moment.
             </p>
           </div>
@@ -231,9 +246,10 @@ export default function ShortsFeed() {
             type="button"
             onClick={() => setMuted((value) => !value)}
             aria-label={muted ? 'Turn sound on' : 'Mute all Shorts'}
-            className="inline-flex items-center gap-2 rounded-xl border border-white/10 px-3 py-2.5 text-sm font-medium text-vault-text transition hover:border-vault-purple/50 hover:bg-vault-purple/10"
+            className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-[#111111] px-3 py-2.5 text-sm font-medium text-gray-300 transition hover:border-orange-500/40 hover:bg-orange-500/5 hover:text-orange-400"
           >
             {muted ? <VolumeX size={16} /> : <Volume2 size={16} />}
+
             <span className="hidden sm:inline">
               {muted ? 'Sound off' : 'Sound on'}
             </span>
@@ -243,18 +259,19 @@ export default function ShortsFeed() {
             type="button"
             onClick={() => loadFeed(true)}
             disabled={refreshing || isLoading}
-            className="inline-flex items-center gap-2 rounded-xl border border-white/10 px-3 py-2.5 text-sm font-medium text-vault-text transition hover:border-vault-purple/50 hover:bg-vault-purple/10 disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-[#111111] px-3 py-2.5 text-sm font-medium text-gray-300 transition hover:border-orange-500/40 hover:bg-orange-500/5 hover:text-orange-400 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <RefreshCw
               size={16}
               className={refreshing || isLoading ? 'animate-spin' : ''}
             />
+
             <span className="hidden sm:inline">Refresh</span>
           </button>
 
           <Link
             to="/upload"
-            className="inline-flex items-center gap-2 rounded-xl bg-vault-purple px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-vault-purple/20 transition hover:bg-vault-purple/80"
+            className="inline-flex items-center gap-2 rounded-xl bg-orange-500 px-4 py-2.5 text-sm font-bold text-black transition hover:bg-orange-400"
           >
             <Upload size={16} />
             <span>Upload</span>
@@ -282,7 +299,7 @@ export default function ShortsFeed() {
             type="button"
             onClick={() => loadFeed(true)}
             disabled={refreshing || isLoading}
-            className="shrink-0 rounded-lg bg-red-500/10 px-3 py-2 text-sm font-semibold text-red-300 hover:bg-red-500/20 disabled:opacity-50"
+            className="shrink-0 rounded-lg bg-red-500/10 px-3 py-2 text-sm font-semibold text-red-300 transition hover:bg-red-500/20 disabled:opacity-50"
           >
             Try again
           </button>
@@ -297,15 +314,15 @@ export default function ShortsFeed() {
           {Array.from({ length: 4 }).map((_, index) => (
             <div
               key={index}
-              className="animate-pulse overflow-hidden rounded-2xl border border-vault-purple/20 bg-vault-surface"
+              className="animate-pulse overflow-hidden rounded-2xl border border-white/10 bg-[#111111]"
             >
-              <div className="aspect-[9/16] max-h-[520px] bg-vault-purple/10" />
+              <div className="aspect-[9/16] max-h-[520px] bg-[#191919]" />
 
               <div className="flex items-center gap-3 p-3">
-                <div className="h-8 w-8 rounded-full bg-vault-purple/20" />
+                <div className="h-8 w-8 rounded-full bg-white/10" />
 
                 <div className="flex-1 space-y-2">
-                  <div className="h-3 w-24 rounded bg-vault-purple/20" />
+                  <div className="h-3 w-24 rounded bg-white/10" />
                   <div className="h-2 w-32 rounded bg-white/5" />
                 </div>
               </div>
@@ -318,22 +335,22 @@ export default function ShortsFeed() {
         publishedShorts.length === 0 &&
         !loadError &&
         !error && (
-          <div className="flex min-h-[320px] flex-col items-center justify-center rounded-2xl border border-dashed border-vault-purple/30 bg-gradient-to-br from-vault-purple/10 via-vault-surface to-vault-purple/5 px-6 py-12 text-center">
-            <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-vault-purple/20 text-vault-accent">
+          <div className="flex min-h-[320px] flex-col items-center justify-center rounded-2xl border border-dashed border-orange-500/20 bg-[#101010] px-6 py-12 text-center">
+            <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl border border-orange-500/15 bg-orange-500/10 text-orange-400">
               <PlaySquare size={30} />
             </div>
 
-            <h2 className="text-lg font-bold text-vault-text">
+            <h2 className="text-lg font-bold text-white">
               No Shorts yet
             </h2>
 
-            <p className="mt-2 max-w-sm text-sm leading-6 text-vault-muted">
+            <p className="mt-2 max-w-sm text-sm leading-6 text-gray-500">
               Be among the first to share an anime moment with the Anime Vault community.
             </p>
 
             <Link
               to="/upload"
-              className="mt-5 inline-flex items-center gap-2 rounded-xl bg-vault-purple px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-vault-purple/20 transition hover:bg-vault-purple/80"
+              className="mt-5 inline-flex items-center gap-2 rounded-xl bg-orange-500 px-4 py-3 text-sm font-bold text-black transition hover:bg-orange-400"
             >
               <Upload size={17} />
               Upload your first Short
@@ -345,12 +362,13 @@ export default function ShortsFeed() {
         <section aria-label="Anime Shorts player">
           <div className="mb-3 flex items-center justify-between gap-3">
             <div>
-              <p className="text-sm font-semibold text-vault-text">
+              <p className="text-sm font-semibold text-gray-200">
                 Short {activeIndex + 1} of {publishedShorts.length}
               </p>
+
               <div className="mt-2 h-1 w-32 overflow-hidden rounded-full bg-white/10">
                 <div
-                  className="h-full rounded-full bg-vault-purple transition-all duration-300"
+                  className="h-full rounded-full bg-orange-500 transition-all duration-300"
                   style={{
                     width: `${
                       ((activeIndex + 1) / publishedShorts.length) * 100
@@ -366,7 +384,7 @@ export default function ShortsFeed() {
                 onClick={() => goToShort(activeIndex - 1)}
                 disabled={activeIndex === 0}
                 aria-label="Previous Short"
-                className="rounded-full border border-vault-purple/30 bg-vault-surface p-2 text-vault-text transition hover:bg-vault-purple disabled:cursor-not-allowed disabled:opacity-30"
+                className="rounded-full border border-white/10 bg-[#111111] p-2 text-gray-300 transition hover:border-orange-500/40 hover:bg-orange-500/10 hover:text-orange-400 disabled:cursor-not-allowed disabled:opacity-30"
               >
                 <ChevronUp size={20} />
               </button>
@@ -376,7 +394,7 @@ export default function ShortsFeed() {
                 onClick={() => goToShort(activeIndex + 1)}
                 disabled={activeIndex >= publishedShorts.length - 1}
                 aria-label="Next Short"
-                className="rounded-full border border-vault-purple/30 bg-vault-surface p-2 text-vault-text transition hover:bg-vault-purple disabled:cursor-not-allowed disabled:opacity-30"
+                className="rounded-full border border-white/10 bg-[#111111] p-2 text-gray-300 transition hover:border-orange-500/40 hover:bg-orange-500/10 hover:text-orange-400 disabled:cursor-not-allowed disabled:opacity-30"
               >
                 <ChevronDown size={20} />
               </button>
@@ -390,10 +408,11 @@ export default function ShortsFeed() {
             onTouchStart={handleTouchStart}
             onTouchEnd={handleTouchEnd}
             onKeyDown={handleKeyDown}
-            className="mx-auto h-[min(76vh,850px)] min-h-[480px] w-full max-w-3xl overflow-y-auto overscroll-contain rounded-[2rem] border border-vault-purple/30 bg-gradient-to-br from-vault-purple/20 via-vault-surface to-vault-purple/10 p-2 shadow-2xl shadow-vault-purple/10 outline-none focus-visible:ring-2 focus-visible:ring-vault-accent sm:p-3"
+            className="mx-auto h-[min(76vh,850px)] min-h-[480px] w-full max-w-3xl overflow-y-auto overscroll-contain rounded-[2rem] border border-white/10 bg-[#090909] p-2 shadow-2xl shadow-black/50 outline-none focus-visible:ring-2 focus-visible:ring-orange-500 sm:p-3"
             style={{
               scrollSnapType: 'y mandatory',
               scrollbarWidth: 'thin',
+              scrollbarColor: '#f97316 #111111',
               WebkitOverflowScrolling: 'touch',
             }}
           >
@@ -411,8 +430,8 @@ export default function ShortsFeed() {
                   scrollSnapStop: 'always',
                 }}
               >
-                <div className="w-full max-w-xl rounded-[1.7rem] bg-gradient-to-br from-vault-purple/50 via-vault-purple/20 to-transparent p-[2px] shadow-xl shadow-vault-purple/10">
-                  <div className="overflow-hidden rounded-[1.6rem] bg-vault-surface">
+                <div className="w-full max-w-xl rounded-[1.7rem] border border-white/[0.06] bg-[#111111] p-[2px] shadow-xl shadow-black/40">
+                  <div className="overflow-hidden rounded-[1.6rem] bg-black">
                     <ShortCard
                       short={short}
                       isActive={activeIndex === index}
@@ -427,7 +446,7 @@ export default function ShortsFeed() {
             ))}
           </div>
 
-          <p className="mt-3 text-center text-xs text-vault-muted">
+          <p className="mt-3 text-center text-xs text-gray-600">
             Swipe up or down, use your mouse wheel, or tap the arrows to change Shorts.
           </p>
         </section>

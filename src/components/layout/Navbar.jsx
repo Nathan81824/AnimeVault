@@ -7,7 +7,6 @@ import {
   X,
   UserRound,
   Library,
-  CreditCard,
   Upload,
   Settings,
   LogOut,
@@ -21,7 +20,7 @@ import { useAuthStore } from '../../features/auth/authStore'
 const navLinks = [
   { name: 'Home', path: '/', icon: Home },
   { name: 'Explore', path: '/explore', icon: Compass },
-  { name: 'Shorts', path: '/shorts' },
+  { name: 'Shorts', path: '/shorts', icon: Clapperboard },
 ]
 
 export default function Navbar() {
@@ -42,6 +41,27 @@ export default function Navbar() {
     }
   }, [user?.id, profile, fetchMyProfile])
 
+  useEffect(() => {
+    setMobileOpen(false)
+    setProfileOpen(false)
+  }, [user?.id])
+
+  useEffect(() => {
+    if (!mobileOpen) return
+
+    const handleEscape = (event) => {
+      if (event.key === 'Escape') {
+        setMobileOpen(false)
+      }
+    }
+
+    window.addEventListener('keydown', handleEscape)
+
+    return () => {
+      window.removeEventListener('keydown', handleEscape)
+    }
+  }, [mobileOpen])
+
   const displayName =
     profile?.displayName ||
     profile?.username ||
@@ -59,7 +79,8 @@ export default function Navbar() {
     null
 
   const initial = displayName.charAt(0).toUpperCase()
-  const profilePath = user?.id ? `/profile/${user.id}` : '/profile'
+
+  const profilePath = '/profile/'
   const channelPath = user?.id ? `/channel/${user.id}` : '/channel'
 
   const closeMenus = () => {
@@ -81,48 +102,48 @@ export default function Navbar() {
     { label: 'My Profile', path: profilePath, icon: UserRound },
     { label: 'My Channel', path: channelPath, icon: Clapperboard },
     { label: 'My Vault', path: '/my-vault', icon: Library },
-    { label: 'Subscriptions', path: '/subscriptions', icon: CreditCard },
     { label: 'Upload Video', path: '/upload', icon: Upload },
     { label: 'Settings', path: '/settings', icon: Settings },
   ]
 
-  const Avatar = ({ size = 'h-8 w-8' }) =>
-    avatarUrl ? (
-      <img
-        src={avatarUrl}
-        alt={`${displayName}'s profile`}
-        className={`${size} shrink-0 rounded-full border border-white/10 object-cover`}
-        onError={(event) => {
-          event.currentTarget.style.display = 'none'
-        }}
-      />
-    ) : (
-      <span
-        className={`flex ${size} shrink-0 items-center justify-center rounded-full bg-vault-purple font-bold text-white`}
-      >
-        {initial}
-      </span>
-    )
+  const Avatar = ({ size = 'h-9 w-9' }) => (
+    <span
+      className={`relative flex ${size} shrink-0 items-center justify-center overflow-hidden rounded-full border border-orange-500/40 bg-gradient-to-br from-orange-400 to-orange-600 font-black text-white`}
+    >
+      {avatarUrl ? (
+        <img
+          src={avatarUrl}
+          alt={`${displayName}'s profile`}
+          className="absolute inset-0 h-full w-full object-cover"
+          onError={(event) => {
+            event.currentTarget.style.display = 'none'
+          }}
+        />
+      ) : (
+        initial
+      )}
+    </span>
+  )
 
   return (
-    <header className="sticky top-0 z-[100] isolate border-b border-white/10 bg-vault-bg/95 text-vault-text shadow-lg shadow-black/10 backdrop-blur-xl">
-      <div className="mx-auto flex h-16 max-w-7xl items-center gap-4 px-4 sm:px-6 lg:px-8">
-<Link
-  to="/"
-  onClick={closeMenus}
-  className="relative z-[120] -ml-9 flex shrink-0 items-center gap-2"
-  aria-label="Anime Vault home"
->
-  <img
-    src={`${import.meta.env.BASE_URL}anime-vault-logo.png`}
-    alt="Anime Vault"
-    className="h-20 w-20 shrink-0 object-contain"
-  />
+    <header className="sticky top-0 z-[100] isolate w-full border-b border-white/10 bg-[#09090b]/95 text-white shadow-lg shadow-black/20 backdrop-blur-xl">
+      <div className="mx-auto flex h-16 max-w-7xl items-center gap-2 px-3 sm:gap-4 sm:px-6 lg:px-8">
+        <Link
+          to="/"
+          onClick={closeMenus}
+          className="flex min-w-0 shrink-0 items-center gap-1 sm:gap-2"
+          aria-label="Anime Vault home"
+        >
+          <img
+            src={`${import.meta.env.BASE_URL}anime-vault-logo.png`}
+            alt="Anime Vault"
+            className="h-14 w-14 shrink-0 object-contain sm:h-16 sm:w-16"
+          />
 
-  <span className="text-lg font-black tracking-tight sm:text-xl">
-    Anime<span className="text-vault-accent">Vault</span>
-  </span>
-</Link>
+          <span className="whitespace-nowrap text-base font-black tracking-tight sm:text-xl">
+            Anime<span className="text-orange-500">Vault</span>
+          </span>
+        </Link>
 
         <nav
           className="ml-5 hidden items-center gap-1 md:flex"
@@ -133,10 +154,10 @@ export default function Navbar() {
               key={path}
               to={path}
               className={({ isActive }) =>
-                `rounded-xl px-3 py-2 text-sm font-medium transition ${
+                `rounded-xl px-3 py-2 text-sm font-semibold transition ${
                   isActive
-                    ? 'bg-vault-purple/15 text-vault-accent'
-                    : 'text-vault-muted hover:bg-white/5 hover:text-white'
+                    ? 'bg-orange-500/10 text-orange-400'
+                    : 'text-zinc-400 hover:bg-white/5 hover:text-white'
                 }`
               }
             >
@@ -145,7 +166,7 @@ export default function Navbar() {
           ))}
         </nav>
 
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex shrink-0 items-center gap-1.5 sm:gap-2">
           <button
             type="button"
             onClick={() => {
@@ -153,12 +174,30 @@ export default function Navbar() {
               navigate('/search')
             }}
             aria-label="Search anime"
-            className="flex h-10 w-10 items-center justify-center rounded-xl text-vault-muted transition hover:bg-white/5 hover:text-white"
+            className="flex h-10 w-10 items-center justify-center rounded-xl text-zinc-400 transition hover:bg-white/5 hover:text-orange-400"
           >
             <Search size={20} />
           </button>
 
-          {user ? (
+          {!user && (
+            <div className="hidden items-center gap-2 sm:flex">
+              <Link
+                to="/login"
+                className="rounded-xl px-4 py-2 text-sm font-semibold text-zinc-400 transition hover:text-orange-400"
+              >
+                Sign In
+              </Link>
+
+              <Link
+                to="/signup"
+                className="rounded-xl bg-orange-500 px-4 py-2 text-sm font-bold text-white shadow-lg shadow-orange-500/15 transition hover:bg-orange-400"
+              >
+                Get Started
+              </Link>
+            </div>
+          )}
+
+          {user && (
             <div
               className="relative hidden sm:block"
               onMouseEnter={() => setProfileOpen(true)}
@@ -173,14 +212,14 @@ export default function Navbar() {
                 aria-label="Open profile menu"
                 aria-expanded={profileOpen}
                 aria-haspopup="menu"
-                className="flex items-center gap-2 rounded-full border border-white/10 bg-white/5 p-1.5 pr-2 transition hover:border-vault-purple/50 hover:bg-white/10"
+                className="flex items-center gap-2 rounded-full border border-white/10 bg-white/5 p-1.5 pr-2 transition hover:border-orange-500/40 hover:bg-white/10"
               >
                 <Avatar />
 
                 <ChevronDown
                   size={15}
-                  className={`text-vault-muted transition-transform ${
-                    profileOpen ? 'rotate-180' : ''
+                  className={`text-zinc-400 transition-transform ${
+                    profileOpen ? 'rotate-180 text-orange-400' : ''
                   }`}
                 />
               </button>
@@ -188,7 +227,7 @@ export default function Navbar() {
               {profileOpen && (
                 <div
                   role="menu"
-                  className="absolute right-0 top-full z-[110] mt-2 w-64 overflow-hidden rounded-2xl border border-white/10 bg-vault-surface p-2 shadow-2xl shadow-black/40"
+                  className="absolute right-0 top-full z-[120] mt-2 w-64 overflow-hidden rounded-2xl border border-white/10 bg-[#151515] p-2 shadow-2xl shadow-black/50"
                 >
                   <Link
                     to={profilePath}
@@ -203,7 +242,7 @@ export default function Navbar() {
                         {displayName}
                       </span>
 
-                      <span className="block truncate text-xs text-vault-muted">
+                      <span className="block truncate text-xs text-zinc-500">
                         View your profile
                       </span>
                     </span>
@@ -217,10 +256,10 @@ export default function Navbar() {
                       to={path}
                       role="menuitem"
                       onClick={closeMenus}
-                      className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-vault-muted transition hover:bg-vault-purple/10 hover:text-white"
+                      className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-zinc-400 transition hover:bg-white/5 hover:text-orange-300"
                     >
                       <Icon size={17} />
-                      <span>{label}</span>
+                      {label}
                     </Link>
                   ))}
 
@@ -234,27 +273,22 @@ export default function Navbar() {
                     className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-red-400 transition hover:bg-red-500/10 disabled:opacity-50"
                   >
                     <LogOut size={17} />
-                    <span>Sign Out</span>
+                    Sign Out
                   </button>
                 </div>
               )}
             </div>
-          ) : (
-            <div className="hidden items-center gap-2 sm:flex">
-              <Link
-                to="/login"
-                className="rounded-xl px-4 py-2 text-sm font-semibold text-vault-muted transition hover:text-white"
-              >
-                Sign In
-              </Link>
+          )}
 
-              <Link
-                to="/signup"
-                className="rounded-xl bg-vault-purple px-4 py-2 text-sm font-bold text-white transition hover:bg-vault-purple/80"
-              >
-                Get Started
-              </Link>
-            </div>
+          {user && (
+            <Link
+              to={profilePath}
+              onClick={closeMenus}
+              aria-label="Go to your profile"
+              className="flex shrink-0 items-center justify-center rounded-full transition hover:scale-105 sm:hidden"
+            >
+              <Avatar size="h-9 w-9" />
+            </Link>
           )}
 
           <button
@@ -265,7 +299,7 @@ export default function Navbar() {
             }}
             aria-label={mobileOpen ? 'Close menu' : 'Open menu'}
             aria-expanded={mobileOpen}
-            className="flex h-10 w-10 items-center justify-center rounded-xl text-vault-muted transition hover:bg-white/5 hover:text-white sm:hidden"
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-zinc-400 transition hover:bg-white/5 hover:text-orange-400 sm:hidden"
           >
             {mobileOpen ? <X size={22} /> : <Menu size={22} />}
           </button>
@@ -273,93 +307,105 @@ export default function Navbar() {
       </div>
 
       {mobileOpen && (
-        <div className="relative z-[110] border-t border-white/10 bg-vault-bg px-4 py-4 sm:hidden">
-          <nav className="flex flex-col gap-1" aria-label="Mobile navigation">
-            {navLinks.map(({ name, path, icon: Icon }) => (
-              <NavLink
-                key={path}
-                to={path}
-                onClick={closeMenus}
-                className={({ isActive }) =>
-                  `flex items-center gap-3 rounded-xl px-3 py-3 text-sm font-medium transition ${
-                    isActive
-                      ? 'bg-vault-purple/15 text-vault-accent'
-                      : 'text-vault-muted hover:bg-white/5 hover:text-white'
-                  }`
-                }
-              >
-                <Icon size={18} />
-                {name}
-              </NavLink>
-            ))}
-          </nav>
+        <>
+          <button
+            type="button"
+            aria-label="Close navigation menu"
+            onClick={() => setMobileOpen(false)}
+            className="fixed inset-0 z-[998] bg-black/40 sm:hidden"
+          />
 
-          <div className="my-4 border-t border-white/10" />
-
-          {user ? (
-            <>
-              <Link
-                to={profilePath}
-                onClick={closeMenus}
-                className="flex items-center gap-3 rounded-xl p-3 transition hover:bg-white/5"
-              >
-                <Avatar size="h-11 w-11" />
-
-                <span className="min-w-0">
-                  <span className="block truncate font-bold text-white">
-                    {displayName}
-                  </span>
-
-                  <span className="block text-xs text-vault-muted">
-                    View your profile
-                  </span>
-                </span>
-              </Link>
-
-              <div className="mt-2 flex flex-col gap-1">
-                {profileItems.map(({ label, path, icon: Icon }) => (
-                  <Link
-                    key={label}
-                    to={path}
-                    onClick={closeMenus}
-                    className="flex items-center gap-3 rounded-xl px-3 py-3 text-sm text-vault-muted transition hover:bg-white/5 hover:text-white"
-                  >
-                    <Icon size={18} />
-                    {label}
-                  </Link>
-                ))}
-
-                <button
-                  type="button"
-                  onClick={handleSignOut}
-                  disabled={isSubmitting}
-                  className="flex items-center gap-3 rounded-xl px-3 py-3 text-left text-sm text-red-400 transition hover:bg-red-500/10 disabled:opacity-50"
+          <div className="absolute left-0 right-0 top-full z-[999] max-h-[calc(100dvh-4rem)] overflow-y-auto overscroll-contain border-t border-white/10 bg-[#0d0d0f] px-4 py-5 shadow-2xl shadow-black/50 sm:hidden">
+            <nav
+              className="flex flex-col gap-1"
+              aria-label="Mobile navigation"
+            >
+              {navLinks.map(({ name, path, icon: Icon }) => (
+                <NavLink
+                  key={path}
+                  to={path}
+                  onClick={closeMenus}
+                  className={({ isActive }) =>
+                    `flex items-center gap-3 rounded-xl px-3 py-3 text-sm font-semibold transition ${
+                      isActive
+                        ? 'bg-orange-500/10 text-orange-400'
+                        : 'text-zinc-400 hover:bg-white/5 hover:text-white'
+                    }`
+                  }
                 >
-                  <LogOut size={18} />
-                  Sign Out
-                </button>
-              </div>
-            </>
-          ) : (
-            <div className="flex flex-col gap-2">
-              <Link
-                to="/login"
-                onClick={closeMenus}
-                className="rounded-xl border border-white/10 px-4 py-3 text-center text-sm font-semibold text-white"
-              >
-                Sign In
-              </Link>
+                  <Icon size={18} />
+                  {name}
+                </NavLink>
+              ))}
+            </nav>
 
-              <Link
-                to="/signup"
-                onClick={closeMenus}
-                className="rounded-xl bg-vault-purple px-4 py-3 text-center text-sm font-bold text-white"
-              >
-                Create Account
-              </Link>
-            </div>
-          )}
-        </div>
+            <div className="my-4 border-t border-white/10" />
+
+            {user ? (
+              <>
+                <Link
+                  to={profilePath}
+                  onClick={closeMenus}
+                  className="flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.03] p-3 transition hover:bg-white/[0.06]"
+                >
+                  <Avatar size="h-11 w-11" />
+
+                  <span className="min-w-0">
+                    <span className="block truncate font-bold text-white">
+                      {displayName}
+                    </span>
+
+                    <span className="block text-xs text-orange-400">
+                      View your profile
+                    </span>
+                  </span>
+                </Link>
+
+                <div className="mt-3 flex flex-col gap-1">
+                  {profileItems.map(({ label, path, icon: Icon }) => (
+                    <Link
+                      key={label}
+                      to={path}
+                      onClick={closeMenus}
+                      className="flex items-center gap-3 rounded-xl px-3 py-3 text-sm text-zinc-400 transition hover:bg-white/5 hover:text-orange-300"
+                    >
+                      <Icon size={18} />
+                      {label}
+                    </Link>
+                  ))}
+
+                  <button
+                    type="button"
+                    onClick={handleSignOut}
+                    disabled={isSubmitting}
+                    className="flex items-center gap-3 rounded-xl px-3 py-3 text-left text-sm text-red-400 transition hover:bg-red-500/10 disabled:opacity-50"
+                  >
+                    <LogOut size={18} />
+                    Sign Out
+                  </button>
+                </div>
+              </>
+            ) : (
+              <div className="flex flex-col gap-2">
+                <Link
+                  to="/login"
+                  onClick={closeMenus}
+                  className="rounded-xl border border-white/10 px-4 py-3 text-center text-sm font-semibold text-white transition hover:border-orange-500/40 hover:text-orange-400"
+                >
+                  Sign In
+                </Link>
+
+                <Link
+                  to="/signup"
+                  onClick={closeMenus}
+                  className="rounded-xl bg-orange-500 px-4 py-3 text-center text-sm font-bold text-white transition hover:bg-orange-400"
+                >
+                  Create Account
+                </Link>
+              </div>
+            )}
+          </div>
+        </>
       )}
     </header>
   )
