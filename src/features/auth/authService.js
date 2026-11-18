@@ -29,15 +29,25 @@ const normalizeUser = (user) => {
     email: user.email || '',
     username:
       metadata.username ||
-      metadata.display_name ||
+      metadata.preferred_username ||
+      metadata.user_name ||
+      metadata.name ||
       '',
     display_name:
       metadata.display_name ||
+      metadata.full_name ||
+      metadata.name ||
       metadata.username ||
       '',
     favorite_anime: metadata.favorite_anime || '',
+    avatar_url:
+      metadata.avatar_url ||
+      metadata.picture ||
+      '',
   }
 }
+
+const SUPPORTED_PROVIDERS = ['google', 'github']
 
 export const authService = {
   async signUp({
@@ -141,6 +151,36 @@ export const authService = {
     return {
       user: normalizeUser(data.user),
       session: data.session,
+      success: true,
+    }
+  },
+
+  async signInWithProvider(provider) {
+    const client = getClient()
+
+    const cleanProvider = provider?.toLowerCase()
+
+    if (!SUPPORTED_PROVIDERS.includes(cleanProvider)) {
+      throw new Error(
+        'Unsupported provider. Choose Google or GitHub.'
+      )
+    }
+
+    const redirectTo = `${window.location.origin}/`
+
+    const { data, error } =
+      await client.auth.signInWithOAuth({
+        provider: cleanProvider,
+        options: {
+          redirectTo,
+          skipBrowserRedirect: false,
+        },
+      })
+
+    throwIfError(error)
+
+    return {
+      data,
       success: true,
     }
   },

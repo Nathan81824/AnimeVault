@@ -3,7 +3,6 @@ import { useCallback, useEffect, useState } from 'react'
 import {
   Routes,
   Route,
-  Navigate,
   useLocation,
   useNavigate,
 } from 'react-router-dom'
@@ -98,9 +97,6 @@ function LoadingScreen() {
 
 function AppLayout() {
   const location = useLocation()
-  const isAuthenticated = useAuthStore(
-    (state) => state.isAuthenticated,
-  )
 
   const isAuthRoute =
     location.pathname === '/login' ||
@@ -108,10 +104,6 @@ function AppLayout() {
 
   if (isAuthRoute) {
     return <AuthPage />
-  }
-
-  if (!isAuthenticated) {
-    return <Navigate to="/login" replace />
   }
 
   return (
@@ -151,7 +143,7 @@ function AppLayout() {
 
             <Route
               path="/admin"
-              element={<Navigate to="/" replace />}
+              element={<Home />}
             />
 
             <Route path="*" element={<NotFound />} />
@@ -172,6 +164,7 @@ export default function App() {
   const navigate = useNavigate()
 
   const initialized = useAuthStore((state) => state.initialized)
+
   const isAuthenticated = useAuthStore(
     (state) => state.isAuthenticated,
   )

@@ -1,3 +1,4 @@
+
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import {
@@ -31,7 +32,7 @@ function AnimePosterCard({ anime }) {
       to={`/anime/${anime.id}`}
       className="group block w-36 shrink-0 sm:w-40"
     >
-      <div className="relative aspect-[2/3] overflow-hidden rounded-xl bg-[#191926]">
+      <div className="relative aspect-[2/3] overflow-hidden rounded-xl bg-[#191919]">
         {anime.image ? (
           <img
             src={anime.image}
@@ -48,16 +49,17 @@ function AnimePosterCard({ anime }) {
         <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent" />
 
         {anime.score && (
-          <span className="absolute bottom-2 left-2 flex items-center gap-1 rounded-md bg-black/65 px-2 py-1 text-xs font-bold text-amber-300">
+          <span className="absolute bottom-2 left-2 flex items-center gap-1 rounded-md bg-black/65 px-2 py-1 text-xs font-bold text-orange-300">
             <Star size={12} fill="currentColor" />
             {formatScore(anime.score)}
           </span>
         )}
       </div>
 
-      <h3 className="mt-2 line-clamp-2 text-sm font-semibold text-gray-200 transition group-hover:text-violet-300">
+      <h3 className="mt-2 line-clamp-2 text-sm font-semibold text-gray-200 transition group-hover:text-orange-400">
         {anime.title}
       </h3>
+
       <p className="mt-1 text-xs text-gray-500">
         {anime.year || anime.type || 'Anime'}
       </p>
@@ -70,7 +72,7 @@ function DetailItem({ icon: Icon, label, value }) {
 
   return (
     <div className="flex items-start gap-3">
-      <div className="mt-0.5 rounded-lg bg-white/5 p-2 text-violet-300">
+      <div className="mt-0.5 rounded-lg bg-orange-500/10 p-2 text-orange-400">
         <Icon size={16} />
       </div>
 
@@ -154,6 +156,7 @@ export default function AnimeDetails() {
     async function checkSavedStatus() {
       setUser(null)
       setSaved(false)
+      setNotice('')
 
       if (!supabase) return
 
@@ -231,8 +234,10 @@ export default function AnimeDetails() {
     return (
       <div className="mx-auto max-w-7xl animate-pulse px-4 py-8 sm:px-6">
         <div className="h-64 rounded-3xl bg-white/5 sm:h-96" />
+
         <div className="mt-8 flex gap-6">
           <div className="h-56 w-40 shrink-0 rounded-2xl bg-white/5" />
+
           <div className="flex-1 space-y-4 pt-3">
             <div className="h-7 w-3/4 rounded bg-white/5" />
             <div className="h-4 w-1/3 rounded bg-white/5" />
@@ -260,7 +265,7 @@ export default function AnimeDetails() {
         <div className="mt-6 flex flex-wrap justify-center gap-3">
           <button
             onClick={() => window.location.reload()}
-            className="inline-flex items-center gap-2 rounded-xl bg-violet-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-violet-500"
+            className="inline-flex items-center gap-2 rounded-xl bg-orange-500 px-4 py-3 text-sm font-semibold text-white transition hover:bg-orange-400"
           >
             <RefreshCw size={16} />
             Try again
@@ -268,7 +273,7 @@ export default function AnimeDetails() {
 
           <Link
             to="/explore"
-            className="rounded-xl border border-white/10 px-4 py-3 text-sm font-semibold text-gray-200 transition hover:bg-white/5"
+            className="rounded-xl border border-white/10 px-4 py-3 text-sm font-semibold text-gray-200 transition hover:border-orange-500/30 hover:bg-orange-500/5"
           >
             Explore anime
           </Link>
@@ -280,13 +285,14 @@ export default function AnimeDetails() {
   const bannerImage = anime.banner || anime.image
   const synopsis = anime.synopsis || 'No synopsis is available for this anime yet.'
   const synopsisIsLong = synopsis.length > 450
+
   const visibleSynopsis =
     synopsisExpanded || !synopsisIsLong
       ? synopsis
       : `${synopsis.slice(0, 450).trimEnd()}...`
 
   return (
-    <div className="min-h-screen bg-[#09090f] text-white">
+    <div className="min-h-screen bg-[#090909] text-white">
       <div className="relative h-[260px] overflow-hidden sm:h-[360px] lg:h-[440px]">
         {bannerImage ? (
           <img
@@ -295,16 +301,16 @@ export default function AnimeDetails() {
             className="h-full w-full object-cover object-center"
           />
         ) : (
-          <div className="h-full w-full bg-gradient-to-br from-violet-950 via-[#191926] to-[#09090f]" />
+          <div className="h-full w-full bg-gradient-to-br from-orange-950 via-[#191919] to-[#090909]" />
         )}
 
-        <div className="absolute inset-0 bg-gradient-to-t from-[#09090f] via-[#09090f]/60 to-black/10" />
-        <div className="absolute inset-0 bg-gradient-to-r from-[#09090f]/75 via-transparent to-transparent" />
+        <div className="absolute inset-0 bg-gradient-to-t from-[#090909] via-[#090909]/60 to-black/10" />
+        <div className="absolute inset-0 bg-gradient-to-r from-[#090909]/75 via-transparent to-transparent" />
 
         <div className="absolute left-4 top-5 sm:left-8 sm:top-8">
           <Link
             to="/explore"
-            className="inline-flex items-center gap-2 rounded-xl border border-white/15 bg-black/30 px-4 py-2.5 text-sm font-semibold text-white backdrop-blur transition hover:bg-black/50"
+            className="inline-flex items-center gap-2 rounded-xl border border-white/15 bg-black/30 px-4 py-2.5 text-sm font-semibold text-white backdrop-blur transition hover:border-orange-400/40 hover:bg-black/50"
           >
             <ArrowLeft size={16} />
             Back to Explore
@@ -312,7 +318,7 @@ export default function AnimeDetails() {
         </div>
 
         <div className="absolute bottom-8 left-4 right-4 sm:bottom-10 sm:left-8 lg:left-12">
-          <p className="mb-3 flex items-center gap-2 text-xs font-bold uppercase tracking-[0.22em] text-violet-300">
+          <p className="mb-3 flex items-center gap-2 text-xs font-bold uppercase tracking-[0.22em] text-orange-400">
             <Sparkles size={15} />
             Anime Vault Spotlight
           </p>
@@ -332,7 +338,7 @@ export default function AnimeDetails() {
       <div className="mx-auto max-w-7xl px-4 pb-16 sm:px-6 lg:px-8">
         <div className="relative -mt-2 grid gap-8 md:grid-cols-[220px_minmax(0,1fr)] lg:grid-cols-[260px_minmax(0,1fr)] lg:gap-10">
           <aside>
-            <div className="overflow-hidden rounded-2xl border border-white/10 bg-[#12121c] shadow-2xl shadow-black/30">
+            <div className="overflow-hidden rounded-2xl border border-white/10 bg-[#151515] shadow-2xl shadow-black/30">
               {anime.image ? (
                 <img
                   src={anime.image}
@@ -349,7 +355,7 @@ export default function AnimeDetails() {
             <div className="mt-4 grid grid-cols-2 gap-3">
               <Link
                 to={`/watch/${anime.id}`}
-                className="col-span-2 inline-flex items-center justify-center gap-2 rounded-xl bg-violet-600 px-4 py-3.5 text-sm font-bold text-white transition hover:bg-violet-500"
+                className="col-span-2 inline-flex items-center justify-center gap-2 rounded-xl bg-orange-500 px-4 py-3.5 text-sm font-bold text-white transition hover:bg-orange-400 hover:shadow-lg hover:shadow-orange-500/10"
               >
                 <Play size={17} fill="currentColor" />
                 Watch
@@ -360,8 +366,8 @@ export default function AnimeDetails() {
                 disabled={saving}
                 className={`col-span-2 inline-flex items-center justify-center gap-2 rounded-xl border px-4 py-3 text-sm font-semibold transition disabled:opacity-60 ${
                   saved
-                    ? 'border-violet-400/40 bg-violet-500/10 text-violet-200'
-                    : 'border-white/10 bg-white/5 text-gray-200 hover:bg-white/10'
+                    ? 'border-orange-400/40 bg-orange-500/10 text-orange-300'
+                    : 'border-white/10 bg-white/5 text-gray-200 hover:border-orange-500/30 hover:bg-orange-500/5 hover:text-orange-300'
                 }`}
               >
                 {saved ? <BookmarkCheck size={17} /> : <Bookmark size={17} />}
@@ -370,12 +376,16 @@ export default function AnimeDetails() {
             </div>
 
             {notice && (
-              <p role="status" className="mt-3 text-sm leading-5 text-violet-300">
+              <p role="status" className="mt-3 text-sm leading-5 text-orange-300">
                 {notice}
+
                 {notice.includes('Sign in') && (
                   <>
                     {' '}
-                    <Link to="/login" className="underline underline-offset-4">
+                    <Link
+                      to="/login"
+                      className="font-semibold underline underline-offset-4 hover:text-orange-200"
+                    >
                       Sign in
                     </Link>
                   </>
@@ -383,35 +393,38 @@ export default function AnimeDetails() {
               </p>
             )}
 
-            <div className="mt-6 rounded-2xl border border-white/10 bg-[#12121c] p-4">
-              <h2 className="mb-4 text-sm font-bold text-white">Anime information</h2>
+            <div className="mt-6 rounded-2xl border border-white/10 bg-[#141414] p-4">
+              <h2 className="mb-4 text-sm font-bold text-white">
+                Anime information
+              </h2>
 
               <div className="space-y-4">
-                <DetailItem
-                  icon={Tv}
-                  label="Format"
-                  value={anime.type}
-                />
+                <DetailItem icon={Tv} label="Format" value={anime.type} />
+
                 <DetailItem
                   icon={CalendarDays}
                   label="Year"
                   value={anime.year}
                 />
+
                 <DetailItem
                   icon={Clapperboard}
                   label="Episodes"
                   value={anime.episodes ? String(anime.episodes) : null}
                 />
+
                 <DetailItem
                   icon={Clock3}
                   label="Duration"
                   value={anime.duration}
                 />
+
                 <DetailItem
                   icon={Sparkles}
                   label="Status"
                   value={anime.status}
                 />
+
                 <DetailItem
                   icon={Users}
                   label="Studios"
@@ -423,12 +436,18 @@ export default function AnimeDetails() {
 
           <main className="min-w-0 pt-5 md:pt-8">
             <div className="flex flex-wrap items-center gap-3">
-              <div className="flex items-center gap-2 rounded-xl border border-amber-300/20 bg-amber-400/10 px-4 py-3">
-                <Star size={20} className="text-amber-300" fill="currentColor" />
+              <div className="flex items-center gap-2 rounded-xl border border-orange-400/20 bg-orange-500/10 px-4 py-3">
+                <Star
+                  size={20}
+                  className="text-orange-400"
+                  fill="currentColor"
+                />
+
                 <div>
                   <p className="text-lg font-black text-white">
                     {formatScore(anime.score)}
                   </p>
+
                   <p className="text-[10px] uppercase tracking-wider text-gray-400">
                     User score
                   </p>
@@ -438,6 +457,7 @@ export default function AnimeDetails() {
               {anime.rank && (
                 <div className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3">
                   <p className="text-lg font-black text-white">#{anime.rank}</p>
+
                   <p className="text-[10px] uppercase tracking-wider text-gray-400">
                     Ranking
                   </p>
@@ -446,7 +466,10 @@ export default function AnimeDetails() {
 
               {anime.popularity && (
                 <div className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3">
-                  <p className="text-lg font-black text-white">#{anime.popularity}</p>
+                  <p className="text-lg font-black text-white">
+                    #{anime.popularity}
+                  </p>
+
                   <p className="text-[10px] uppercase tracking-wider text-gray-400">
                     Popularity
                   </p>
@@ -460,7 +483,7 @@ export default function AnimeDetails() {
                   <Link
                     key={genre}
                     to={`/explore?genre=${encodeURIComponent(genre)}`}
-                    className="rounded-full border border-violet-400/20 bg-violet-500/10 px-3.5 py-2 text-xs font-semibold text-violet-200 transition hover:border-violet-400/40 hover:bg-violet-500/20"
+                    className="rounded-full border border-orange-400/20 bg-orange-500/10 px-3.5 py-2 text-xs font-semibold text-orange-300 transition hover:border-orange-400/50 hover:bg-orange-500/20"
                   >
                     {genre}
                   </Link>
@@ -480,21 +503,24 @@ export default function AnimeDetails() {
               {synopsisIsLong && (
                 <button
                   onClick={() => setSynopsisExpanded((current) => !current)}
-                  className="mt-3 text-sm font-semibold text-violet-300 transition hover:text-violet-200"
+                  className="mt-3 text-sm font-semibold text-orange-400 transition hover:text-orange-300"
                 >
                   {synopsisExpanded ? 'Show less' : 'Read more'}
                 </button>
               )}
             </section>
 
-            <section className="mt-9 rounded-2xl border border-white/10 bg-[#12121c] p-5 sm:p-6">
+            <section className="mt-9 rounded-2xl border border-white/10 bg-[#141414] p-5 sm:p-6">
               <div className="flex items-center gap-3">
-                <div className="rounded-xl bg-violet-500/10 p-2.5 text-violet-300">
+                <div className="rounded-xl bg-orange-500/10 p-2.5 text-orange-400">
                   <Heart size={20} />
                 </div>
 
                 <div>
-                  <h2 className="font-bold text-white">Make it part of your vault</h2>
+                  <h2 className="font-bold text-white">
+                    Make it part of your vault
+                  </h2>
+
                   <p className="mt-1 text-sm text-gray-400">
                     Keep track of the anime you want to explore.
                   </p>
@@ -504,7 +530,11 @@ export default function AnimeDetails() {
               <button
                 onClick={toggleSaved}
                 disabled={saving}
-                className="mt-5 inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-semibold text-gray-200 transition hover:bg-white/10 disabled:opacity-60"
+                className={`mt-5 inline-flex items-center gap-2 rounded-xl border px-4 py-3 text-sm font-semibold transition disabled:opacity-60 ${
+                  saved
+                    ? 'border-orange-400/30 bg-orange-500/10 text-orange-300'
+                    : 'border-white/10 bg-white/5 text-gray-200 hover:border-orange-500/30 hover:bg-orange-500/5 hover:text-orange-300'
+                }`}
               >
                 {saved ? <BookmarkCheck size={17} /> : <Bookmark size={17} />}
                 {saving ? 'Saving...' : saved ? 'Saved to My Vault' : 'Save this anime'}
@@ -515,9 +545,10 @@ export default function AnimeDetails() {
               <section className="mt-10">
                 <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
                   <div>
-                    <p className="text-xs font-bold uppercase tracking-[0.18em] text-violet-300">
+                    <p className="text-xs font-bold uppercase tracking-[0.18em] text-orange-400">
                       Keep exploring
                     </p>
+
                     <h2 className="mt-1 text-xl font-bold text-white sm:text-2xl">
                       You might also like
                     </h2>
@@ -525,7 +556,7 @@ export default function AnimeDetails() {
 
                   <Link
                     to="/explore"
-                    className="inline-flex items-center gap-1 text-sm font-semibold text-gray-400 transition hover:text-white"
+                    className="inline-flex items-center gap-1 text-sm font-semibold text-gray-400 transition hover:text-orange-400"
                   >
                     View all
                     <ChevronRight size={16} />
@@ -545,7 +576,7 @@ export default function AnimeDetails() {
                 href={anime.url}
                 target="_blank"
                 rel="noreferrer"
-                className="mt-8 inline-flex items-center gap-2 text-sm text-gray-500 transition hover:text-violet-300"
+                className="mt-8 inline-flex items-center gap-2 text-sm text-gray-500 transition hover:text-orange-400"
               >
                 View source details
                 <ExternalLink size={14} />

@@ -1,3 +1,4 @@
+
 import { create } from 'zustand'
 import { authService } from './authService'
 import profileService from '../profile/profileService'
@@ -470,6 +471,54 @@ export const useAuthStore = create((set, get) => ({
       console.error('SUPABASE LOGIN ERROR:', error)
 
       const message = error?.message || 'Could not sign in.'
+
+      set({ error: message })
+
+      return {
+        success: false,
+        error: message,
+      }
+    } finally {
+      set({ isSubmitting: false })
+    }
+  },
+
+  signInWithProvider: async (provider) => {
+    if (get().isSubmitting) {
+      return {
+        success: false,
+        error: 'Please wait for the current request to finish.',
+      }
+    }
+
+    if (!['google', 'github'].includes(provider)) {
+      const message = 'Unsupported sign-in provider.'
+
+      set({ error: message })
+
+      return {
+        success: false,
+        error: message,
+      }
+    }
+
+    set({
+      isSubmitting: true,
+      error: '',
+      successMessage: '',
+    })
+
+    try {
+      await authService.signInWithProvider(provider)
+
+      return {
+        success: true,
+      }
+    } catch (error) {
+      console.error(`${provider} SIGN-IN ERROR:`, error)
+
+      const message =
+        error?.message || `Could not sign in with ${provider}.`
 
       set({ error: message })
 

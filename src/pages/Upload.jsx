@@ -271,15 +271,6 @@ export default function Upload() {
     }
   }, [])
 
-  useEffect(() => {
-    if (!user) {
-      navigate('/login', {
-        replace: true,
-        state: { from: { pathname: '/upload' } },
-      })
-    }
-  }, [user, navigate])
-
   const switchMode = (nextMode) => {
     if (busy) return
 
@@ -502,17 +493,19 @@ export default function Upload() {
   const saveShort = async (type) => {
     if (busy) return
 
+    if (!user) {
+      navigate('/login', {
+        state: { from: { pathname: '/upload' } },
+      })
+      return
+    }
+
     setLocalError('')
 
     const validationError = validate(type)
 
     if (validationError) {
       setLocalError(validationError)
-      return
-    }
-
-    if (!user) {
-      navigate('/login')
       return
     }
 
@@ -586,9 +579,52 @@ export default function Upload() {
 
   if (!user) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-vault-bg text-vault-muted">
-        <LoaderCircle size={30} className="animate-spin" />
-      </div>
+      <main className="flex min-h-screen items-center justify-center bg-vault-bg px-4 py-10 text-vault-text">
+        <section className="w-full max-w-md rounded-3xl border border-orange-500/20 bg-vault-surface p-7 text-center shadow-[0_20px_80px_rgba(0,0,0,0.35)] sm:p-9">
+          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl border border-orange-500/25 bg-orange-500/10 text-orange-400">
+            <Film size={30} />
+          </div>
+
+          <p className="mt-6 text-xs font-bold tracking-[3px] text-orange-400">
+            ANIME VAULT CREATOR
+          </p>
+
+          <h1 className="mt-3 text-2xl font-black text-white sm:text-3xl">
+            Sign in to create a Short
+          </h1>
+
+          <p className="mx-auto mt-3 max-w-sm text-sm leading-6 text-vault-muted">
+            You can explore Anime Vault as a guest, but you need an account to
+            upload videos, save drafts, and publish Shorts.
+          </p>
+
+          <div className="mt-7 grid gap-3">
+            <Link
+              to="/login"
+              state={{ from: { pathname: '/upload' } }}
+              className="flex items-center justify-center rounded-xl bg-orange-500 px-5 py-3.5 text-sm font-bold text-white transition duration-300 hover:bg-orange-400 hover:shadow-[0_8px_30px_rgba(249,115,22,0.2)]"
+            >
+              Sign in
+            </Link>
+
+            <Link
+              to="/signup"
+              state={{ from: { pathname: '/upload' } }}
+              className="flex items-center justify-center rounded-xl border border-orange-500/30 bg-orange-500/10 px-5 py-3.5 text-sm font-bold text-orange-300 transition duration-300 hover:border-orange-400/60 hover:bg-orange-500/15"
+            >
+              Create an account
+            </Link>
+          </div>
+
+          <Link
+            to="/shorts"
+            className="mt-6 inline-flex items-center gap-2 text-sm font-semibold text-vault-muted transition hover:text-white"
+          >
+            <ArrowLeft size={16} />
+            Back to Shorts
+          </Link>
+        </section>
+      </main>
     )
   }
 
