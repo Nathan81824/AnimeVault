@@ -49,7 +49,7 @@ const normalizeUser = (user) => {
 
 const SUPPORTED_PROVIDERS = ['google', 'github']
 
-export const authService = {
+const authService = {
   async signUp({
     email,
     password,
@@ -293,4 +293,5 @@ export const authService = {
   },
 }
 
+export { authService }
 export default authService

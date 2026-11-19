@@ -17,13 +17,14 @@ import {
   Flame,
   Sparkles,
   LogOut,
+  Tv,
 } from 'lucide-react'
 
 const bottomLinks = [
   { label: 'Home', to: '/', icon: House, end: true },
   { label: 'Explore', to: '/explore', icon: Compass },
   { label: 'Shorts', to: '/shorts', icon: Clapperboard },
-  { label: 'My Vault', to: '/my-vault', icon: Library },
+  { label: 'Channels', to: '/channels', icon: Tv },
 ]
 
 const menuLinks = [
@@ -31,6 +32,7 @@ const menuLinks = [
   { label: 'Explore Anime', to: '/explore', icon: Compass },
   { label: 'Trending', to: '/explore?sort=popular', icon: Flame },
   { label: 'Anime Shorts', to: '/shorts', icon: Clapperboard },
+  { label: 'Channels', to: '/channels', icon: Tv },
   { label: 'My Vault', to: '/my-vault', icon: Library },
   { label: 'Upload Video', to: '/upload', icon: Upload },
   { label: 'My Profile', to: '/profile/', icon: UserRound },
@@ -110,14 +112,14 @@ export default function MobileNav() {
         aria-label="Mobile navigation"
         className="fixed inset-x-0 bottom-0 z-50 border-t border-orange-500/20 bg-[#09090b]/95 pb-[env(safe-area-inset-bottom)] text-white shadow-[0_-8px_30px_rgba(0,0,0,0.3)] backdrop-blur-2xl md:hidden"
       >
-        <div className="mx-auto grid h-16 max-w-lg grid-cols-5 items-center px-2">
+        <div className="mx-auto grid h-[68px] max-w-lg grid-cols-5 items-center px-2">
           {bottomLinks.map(({ label, to, icon: Icon, end }) => (
             <NavLink
               key={label}
               to={to}
               end={end}
               className={({ isActive }) =>
-                `relative flex h-full flex-col items-center justify-center gap-1 transition-all duration-200 ${
+                `group relative flex h-full flex-col items-center justify-center gap-1.5 transition-all duration-200 ${
                   isActive
                     ? 'text-orange-400'
                     : 'text-gray-500 hover:text-gray-200'
@@ -126,13 +128,29 @@ export default function MobileNav() {
             >
               {({ isActive }) => (
                 <>
-                  <Icon size={21} strokeWidth={isActive ? 2.5 : 1.8} />
-                  <span className="text-[10px] font-semibold">
+                  <span
+                    className={`relative flex h-9 w-12 items-center justify-center rounded-2xl transition-all duration-200 ${
+                      isActive
+                        ? 'bg-orange-500/15 shadow-[0_0_18px_rgba(249,115,22,0.12)]'
+                        : 'group-hover:bg-white/[0.05]'
+                    }`}
+                  >
+                    <Icon
+                      size={21}
+                      strokeWidth={isActive ? 2.5 : 1.8}
+                    />
+                    {isActive && (
+                      <span className="absolute -top-0.5 h-1 w-1 rounded-full bg-orange-400 shadow-[0_0_8px_rgba(249,115,22,0.9)]" />
+                    )}
+                  </span>
+
+                  <span
+                    className={`text-[10px] font-bold tracking-wide ${
+                      isActive ? 'text-orange-400' : 'text-gray-500'
+                    }`}
+                  >
                     {label}
                   </span>
-                  {isActive && (
-                    <span className="absolute bottom-0 h-0.5 w-8 rounded-full bg-orange-500 shadow-[0_0_10px_rgba(249,115,22,0.7)]" />
-                  )}
                 </>
               )}
             </NavLink>
@@ -143,12 +161,22 @@ export default function MobileNav() {
             onClick={() => setMenuOpen(true)}
             aria-label="Open more navigation options"
             aria-expanded={menuOpen}
-            className={`flex h-full flex-col items-center justify-center gap-1 transition ${
+            className={`group flex h-full flex-col items-center justify-center gap-1.5 transition ${
               menuOpen ? 'text-orange-400' : 'text-gray-500 hover:text-gray-200'
             }`}
           >
-            {menuOpen ? <X size={21} /> : <Menu size={21} />}
-            <span className="text-[10px] font-semibold">More</span>
+            <span
+              className={`flex h-9 w-12 items-center justify-center rounded-2xl transition ${
+                menuOpen
+                  ? 'bg-orange-500/15'
+                  : 'group-hover:bg-white/[0.05]'
+              }`}
+            >
+              {menuOpen ? <X size={21} /> : <Menu size={21} />}
+            </span>
+            <span className="text-[10px] font-bold tracking-wide">
+              More
+            </span>
           </button>
         </div>
       </nav>

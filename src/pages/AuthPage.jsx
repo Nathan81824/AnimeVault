@@ -14,8 +14,8 @@ import {
   CheckCircle2,
   LogIn,
   UserPlus,
-  Chrome,
   GitBranch,
+  Globe,
 } from 'lucide-react'
 
 import { useAuthStore } from '../features/auth/authStore'
@@ -371,7 +371,7 @@ export default function AuthPage() {
                     {activeProvider === 'google' ? (
                       <LoaderCircle size={19} className="animate-spin" />
                     ) : (
-                      <Chrome size={19} className="text-orange-400" />
+                      <Globe size={19} className="text-orange-400" />
                     )}
                     {activeProvider === 'google'
                       ? 'Connecting to Google...'

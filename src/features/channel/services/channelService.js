@@ -2,6 +2,8 @@
 import { supabase } from '../../../lib/supabase'
 import profileService from '../../profile/profileService'
 
+const CHANNELS_TABLE = 'channels'
+const PROFILES_TABLE = 'profiles'
 const SHORTS_TABLE = 'shorts'
 const SUBSCRIPTIONS_TABLE = 'creator_subscriptions'
 const LIKES_TABLE = 'short_likes'
@@ -109,15 +111,72 @@ const countByShortId = (rows) => {
   return counts
 }
 
+const normalizeChannel = (channel, profile = {}) => {
+  if (!channel) return null
+
+  return {
+    id: channel.user_id,
+    userId: channel.user_id,
+
+    channelName:
+      channel.channel_name ||
+      profile.display_name ||
+      profile.username ||
+      'Anime Vault User',
+
+    username:
+      channel.handle ||
+      profile.username ||
+      '',
+
+    handle: channel.handle || '',
+
+    displayName:
+      channel.channel_name ||
+      profile.display_name ||
+      profile.username ||
+      'Anime Vault User',
+
+    avatarUrl:
+      channel.avatar_url ||
+      profile.avatar_url ||
+      null,
+
+    bannerUrl:
+      channel.banner_url ||
+      profile.banner_url ||
+      null,
+
+    bio:
+      channel.description ||
+      profile.bio ||
+      '',
+
+    description:
+      channel.description ||
+      profile.bio ||
+      '',
+
+    website: profile.website || '',
+
+    createdAt:
+      channel.created_at ||
+      profile.created_at ||
+      null,
+
+    updatedAt: channel.updated_at || null,
+  }
+}
+
 const channelService = {
   async getChannels() {
     try {
       const client = getClient()
 
-      const [profilesResult, subscriptionsResult, publishedShorts] =
+      const [channelsResult, subscriptionsResult, publishedShorts] =
         await Promise.all([
           client
-            .from('profiles')
+            .from(CHANNELS_TABLE)
             .select('*')
             .order('created_at', { ascending: false }),
 
@@ -128,8 +187,32 @@ const channelService = {
           getPublishedShorts(client),
         ])
 
-      if (profilesResult.error) throw profilesResult.error
+      if (channelsResult.error) throw channelsResult.error
       if (subscriptionsResult.error) throw subscriptionsResult.error
+
+      const channels = channelsResult.data || []
+      const channelIds = channels
+        .map((channel) => channel.user_id)
+        .filter(Boolean)
+
+      let profiles = []
+
+      if (channelIds.length > 0) {
+        const { data, error } = await client
+          .from(PROFILES_TABLE)
+          .select('*')
+          .in('id', channelIds)
+
+        if (error) throw error
+
+        profiles = data || []
+      }
+
+      const profilesById = {}
+
+      profiles.forEach((profile) => {
+        profilesById[profile.id] = profile
+      })
 
       const subscriberCounts = {}
 
@@ -163,26 +246,27 @@ const channelService = {
           (viewCounts[short.id] || 0)
       })
 
-      const channels = (profilesResult.data || []).map((profile) => ({
-        id: profile.id,
-        username: profile.username || '',
-        displayName:
-          profile.display_name ||
-          profile.username ||
-          'Anime Vault User',
-        avatarUrl: profile.avatar_url || null,
-        bannerUrl: profile.banner_url || null,
-        bio: profile.bio || '',
-        website: profile.website || '',
-        createdAt: profile.created_at || null,
-        subscriberCount: subscriberCounts[profile.id] || 0,
-        totalViews: creatorViews[profile.id] || 0,
-        viewCount: creatorViews[profile.id] || 0,
-      }))
+      const normalizedChannels = channels.map((channel) => {
+        const profile = profilesById[channel.user_id] || {}
+        const normalized = normalizeChannel(channel, profile)
 
-      return { data: channels, error: null }
+        return {
+          ...normalized,
+          subscriberCount: subscriberCounts[channel.user_id] || 0,
+          totalViews: creatorViews[channel.user_id] || 0,
+          viewCount: creatorViews[channel.user_id] || 0,
+        }
+      })
+
+      return {
+        data: normalizedChannels,
+        error: null,
+      }
     } catch (error) {
-      return { data: null, error }
+      return {
+        data: null,
+        error,
+      }
     }
   },
 
@@ -194,31 +278,45 @@ const channelService = {
 
       const client = getClient()
 
-      const [profileResult, shortsResult, subscribersResult] =
-        await Promise.all([
-          profileService.getProfile(userId),
+      const [
+        channelResult,
+        profileResult,
+        shortsResult,
+        subscribersResult,
+      ] = await Promise.all([
+        client
+          .from(CHANNELS_TABLE)
+          .select('*')
+          .eq('user_id', userId)
+          .maybeSingle(),
 
-          client
-            .from(SHORTS_TABLE)
-            .select('*')
-            .eq('user_id', userId)
-            .eq('status', 'published')
-            .order('published_at', { ascending: false })
-            .order('created_at', { ascending: false }),
+        profileService.getProfile(userId),
 
-          client
-            .from(SUBSCRIPTIONS_TABLE)
-            .select('*', { count: 'exact', head: true })
-            .eq('creator_id', userId),
-        ])
+        client
+          .from(SHORTS_TABLE)
+          .select('*')
+          .eq('user_id', userId)
+          .eq('status', 'published')
+          .order('published_at', { ascending: false })
+          .order('created_at', { ascending: false }),
 
+        client
+          .from(SUBSCRIPTIONS_TABLE)
+          .select('*', { count: 'exact', head: true })
+          .eq('creator_id', userId),
+      ])
+
+      if (channelResult.error) throw channelResult.error
       if (profileResult.error) throw profileResult.error
       if (shortsResult.error) throw shortsResult.error
       if (subscribersResult.error) throw subscribersResult.error
 
-      if (!profileResult.data) {
+      if (!channelResult.data) {
         throw new Error('This channel could not be found.')
       }
+
+      const profile = profileResult.data || {}
+      const channel = normalizeChannel(channelResult.data, profile)
 
       let isSubscribed = false
 
@@ -268,21 +366,33 @@ const channelService = {
 
       return {
         data: {
-          profile: profileResult.data,
+          profile: {
+            ...profile,
+            ...channel,
+          },
+
+          channel,
           shorts,
+
           subscriberCount: subscribersResult.count || 0,
           videoCount: 0,
           shortsCount: shorts.length,
+
           totalViews,
           totalLikes,
           totalComments,
+
           isOwner: viewerId === userId,
           isSubscribed,
         },
+
         error: null,
       }
     } catch (error) {
-      return { data: null, error }
+      return {
+        data: null,
+        error,
+      }
     }
   },
 
@@ -301,7 +411,10 @@ const channelService = {
         error: null,
       }
     } catch (error) {
-      return { data: null, error }
+      return {
+        data: null,
+        error,
+      }
     }
   },
 
@@ -320,9 +433,15 @@ const channelService = {
 
       if (error) throw error
 
-      return { data: count || 0, error: null }
+      return {
+        data: count || 0,
+        error: null,
+      }
     } catch (error) {
-      return { data: null, error }
+      return {
+        data: null,
+        error,
+      }
     }
   },
 
@@ -333,7 +452,10 @@ const channelService = {
       }
 
       if (creatorId === subscriberId) {
-        return { data: false, error: null }
+        return {
+          data: false,
+          error: null,
+        }
       }
 
       const client = getClient()
@@ -347,9 +469,15 @@ const channelService = {
 
       if (error) throw error
 
-      return { data: Boolean(data), error: null }
+      return {
+        data: Boolean(data),
+        error: null,
+      }
     } catch (error) {
-      return { data: null, error }
+      return {
+        data: null,
+        error,
+      }
     }
   },
 
@@ -364,6 +492,7 @@ const channelService = {
       }
 
       const client = getClient()
+
       const existing = await this.checkSubscription(
         creatorId,
         subscriberId,
@@ -394,7 +523,10 @@ const channelService = {
         error: null,
       }
     } catch (error) {
-      return { success: false, error }
+      return {
+        success: false,
+        error,
+      }
     }
   },
 
@@ -418,12 +550,18 @@ const channelService = {
 
       if (error) throw error
 
-      return { success: true, error: null }
+      return {
+        success: true,
+        error: null,
+      }
     } catch (error) {
-      return { success: false, error }
+      return {
+        success: false,
+        error,
+      }
     }
   },
 }
 
-export { normalizeShort }
+export { normalizeShort, normalizeChannel }
 export default channelService
